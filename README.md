@@ -14,7 +14,7 @@ On-screen software keyboard library for Wii homebrew, built on libogc / GX.
 - 4:3 and 16:9 (anamorphic) output, NTSC and PAL
 - UTF-8 in and out
 - No asset files: every texture is generated at startup, and the anti-aliased proportional font
-  (Zen Maru Gothic, SIL Open Font License) is compiled in
+  (Rodin NTLG Pro DB, the Wii system font) is compiled in
 - Two ways to use it:
   - Inside your own GX render loop with `OSK_Update()` and `OSK_Draw()`.
   - As a blocking `OSK_Prompt()` for console/framebuffer apps.
@@ -169,7 +169,6 @@ example/gx              GX integration example
 example/console         OSK_Prompt() example
 tests/selftest          scripted self-test
 tools/mkfont.py         generates source/osk_font_data.c from the font
-tools/fonts/OFL.txt     the font's license
 tools/preview           desktop build: previews and self-test
 nintendo_sdk_original/  original SDK package (local reference only, git-ignored)
 ```
@@ -180,8 +179,8 @@ This folder used to hold Nintendo's 2009 *Software Keyboard* SDK sample, which i
 SDK code. That material is kept in `nintendo_sdk_original/` only for local reference and must not be
 redistributed. wiiosk is a separate, original implementation that uses only libogc. The look is
 modelled on the Wii system keyboard and recreated with procedurally generated graphics; no Nintendo
-code, layouts, textures, fonts or sounds are included.
+code, layouts, textures or sounds are included.
 
-The font is Zen Maru Gothic Medium, (c) 2021 The Zen Maru Gothic Project Authors, under the SIL Open Font License 1.1
-(`tools/fonts/OFL.txt`). `source/osk_font_data.c` holds glyph bitmaps rendered from it by
-`tools/mkfont.py`.
+The font is FOT-Rodin NTLG Pro DB by Fontworks, the typeface used by the Wii system menu. It is a
+commercial font and is not included; `source/osk_font_data.c` holds glyph bitmaps rendered from it by
+`tools/mkfont.py`. To build with a different font, pass its TTF/OTF to `tools/mkfont.py`.
