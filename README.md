@@ -14,7 +14,7 @@ On-screen software keyboard library for Wii homebrew, built on libogc / GX.
 - 4:3 and 16:9 (anamorphic) output, NTSC and PAL
 - UTF-8 in and out
 - No asset files: every texture is generated at startup, and the anti-aliased proportional font
-  (Rodin NTLG Pro DB, the Wii system font) is compiled in
+  (Rodin NTLG Pro DB, the Wii system font) is compiled in, LZSS-compressed to about 21 KB
 - Two ways to use it:
   - Inside your own GX render loop with `OSK_Update()` and `OSK_Draw()`.
   - As a blocking `OSK_Prompt()` for console/framebuffer apps.

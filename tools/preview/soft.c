@@ -24,22 +24,25 @@ bool osk_backend_init(void)
 {
 	osk_image *font = &images[OSK_TEX_FONT];
 	unsigned x, y;
+	u8 *atlas;
 
 	if (ready)
 		return true;
 	if (!osk_gfx_generate(images))
 		return false;
+	atlas = osk_font_unpack();
 	font->w = osk_font_atlas_w;
 	font->h = osk_font_atlas_h;
 	font->rgba = malloc(font->w * font->h * 4);
 	for (y = 0; y < font->h; y++) {
 		for (x = 0; x < font->w; x++) {
-			u8 b = osk_font_atlas[(y * font->w + x) / 2];
+			u8 b = atlas[(y * font->w + x) / 2];
 			u8 v = ((x & 1) ? b & 15 : b >> 4) * 17;
 			u8 *p = &font->rgba[(y * font->w + x) * 4];
 			p[0] = p[1] = p[2] = p[3] = v;
 		}
 	}
+	free(atlas);
 	ready = true;
 	return true;
 }

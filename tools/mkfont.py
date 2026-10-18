@@ -4,12 +4,15 @@
     python3 tools/mkfont.py path/to/FOT-RodinNTLGPro-DB.otf > source/osk_font_data.c
 
 Any TrueType/OpenType font works; the atlas header names the font it was
-rendered from. Requires Pillow.
+rendered from. The 4-bit atlas is stored LZSS-compressed (see lzss() below
+and osk_font_unpack() in source/osk_text.c) and unpacked once at startup.
+Requires Pillow.
 """
 import sys
 from PIL import Image, ImageDraw, ImageFont
 
-EM = 34			# pixel size the atlas is rendered at
+EM = 31			# pixel size the atlas is rendered at: cap height just above
+			# the largest on-screen text, so glyphs are only ever scaled down
 SS = 4			# supersampling factor
 PAD = 2			# empty texels around every glyph (bilinear filtering)
 ATLAS_W = 512
@@ -47,10 +50,10 @@ def main():
 		img = img.resize((w, h), Image.BOX)
 		glyphs.append((cp, img, x0, -y0, adv))
 
-	# shelf packing
+	# shelf packing, tallest glyphs first so shelves waste little height
 	x = y = shelf = 0
 	placed = []
-	for cp, img, left, top, adv in glyphs:
+	for cp, img, left, top, adv in sorted(glyphs, key=lambda g: -g[1].size[1] if g[1] else 0):
 		if img is None:
 			placed.append((cp, 0, 0, 0, 0, 0, 0, adv))
 			continue
@@ -62,6 +65,7 @@ def main():
 		shelf = max(shelf, h + 2 * PAD)
 	atlas_h = y + shelf
 	atlas_h = (atlas_h + 7) & ~7
+	placed.sort(key=lambda p: p[0])
 
 	atlas = Image.new('L', (ATLAS_W, atlas_h), 0)
 	for p in placed:
@@ -75,14 +79,16 @@ def main():
 	out.write('const unsigned osk_font_atlas_w = %d, osk_font_atlas_h = %d;\n' % (ATLAS_W, atlas_h))
 	out.write('const float osk_font_em = %d.0f, osk_font_cap = %.3ff, osk_font_ascent = %.3ff, osk_font_descent = %.3ff;\n\n'
 		  % (EM, cap, ascent / SS, descent / SS))
-	out.write('/* 4-bit coverage, two texels per byte, left texel in the high nibble */\n')
-	out.write('const u8 osk_font_atlas[%d] __attribute__((aligned(32))) = {\n' % (ATLAS_W * atlas_h // 2))
 	data = []
 	for yy in range(atlas_h):
 		for xx in range(0, ATLAS_W, 2):
 			a = (px[xx, yy] * 15 + 127) // 255
 			b = (px[xx + 1, yy] * 15 + 127) // 255
 			data.append(a << 4 | b)
+	data = lzss(data)
+	out.write('/* LZSS-compressed 4-bit coverage, two texels per byte, left texel in the\n'
+		  '   high nibble (%d bytes unpacked) */\n' % (ATLAS_W * atlas_h // 2))
+	out.write('const u8 osk_font_atlas_lz[%d] = {\n' % len(data))
 	for i in range(0, len(data), 24):
 		out.write('\t' + ','.join('0x%02x' % v for v in data[i:i + 24]) + ',\n')
 	out.write('};\n\n')
@@ -92,6 +98,47 @@ def main():
 		out.write('\t{ 0x%04x, %3d, %3d, %2d, %2d, %3d, %3d, %4d },\n' % (cp, gx, gy, w, h, left, top, round(adv * 16)))
 	out.write('};\n')
 	out.write('const unsigned osk_font_nglyphs = %d;\n' % len(placed))
+
+
+def lzss(data):
+	"""Each flag byte (MSB first) says whether the next 8 items are a literal
+	byte (0) or a back-reference (1). A back-reference is two bytes,
+	LLLLDDDD DDDDDDDD: copy from distance D+1; length L+2 for L = 1..15, or
+	for L = 0 a third byte N gives length N+18."""
+	MAXLEN, WIN = 255 + 18, 4096
+	out, n, i = [], len(data), 0
+	heads = {}
+	while i < n:
+		flag_pos = len(out)
+		out.append(0)
+		for bit in range(8):
+			if i >= n:
+				break
+			best = dist = 0
+			for p in reversed(heads.get(bytes(data[i:i + 3]), [])[-256:]):
+				if i - p > WIN:
+					break
+				l = 0
+				while l < MAXLEN and i + l < n and data[p + l] == data[i + l]:
+					l += 1
+				if l > best:
+					best, dist = l, i - p
+					if l == MAXLEN:
+						break
+			take = best if best >= 3 else 1
+			for k in range(i, i + take):
+				heads.setdefault(bytes(data[k:k + 3]), []).append(k)
+			if take == 1:
+				out.append(data[i])
+			else:
+				out[flag_pos] |= 0x80 >> bit
+				d = dist - 1
+				if take <= 17:
+					out += [(take - 2) << 4 | d >> 8, d & 0xFF]
+				else:
+					out += [d >> 8, d & 0xFF, take - 18]
+			i += take
+	return out
 
 
 if __name__ == '__main__':

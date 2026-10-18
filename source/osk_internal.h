@@ -114,7 +114,7 @@ typedef struct {
 
 extern const unsigned osk_font_atlas_w, osk_font_atlas_h;
 extern const float osk_font_em, osk_font_cap, osk_font_ascent, osk_font_descent;
-extern const u8 osk_font_atlas[];
+extern const u8 osk_font_atlas_lz[];
 extern const osk_glyph osk_font_glyphs[];
 extern const unsigned osk_font_nglyphs;
 
@@ -125,6 +125,7 @@ typedef struct {
 	float char_space;
 } osk_font_size;
 
+u8 *osk_font_unpack(void);
 const osk_glyph *osk_find_glyph(uint32_t cp);
 float osk_glyph_scale_y(const osk_font_size *fs);
 float osk_char_advance(uint32_t cp, const osk_font_size *fs);

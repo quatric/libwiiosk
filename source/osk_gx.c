@@ -49,18 +49,22 @@ static void *tile_rgba8(const osk_image *im)
 static void *tile_font(void)
 {
 	unsigned w = osk_font_atlas_w, h = osk_font_atlas_h, tx, ty, y;
-	u8 *buf = memalign(32, w * h / 2), *out = buf;
+	u8 *atlas = osk_font_unpack(), *buf = memalign(32, w * h / 2), *out = buf;
 
-	if (!buf)
+	if (!atlas || !buf) {
+		free(atlas);
+		free(buf);
 		return NULL;
+	}
 	for (ty = 0; ty < h; ty += 8) {
 		for (tx = 0; tx < w; tx += 8) {
 			for (y = 0; y < 8; y++) {
-				memcpy(out, &osk_font_atlas[((ty + y) * w + tx) / 2], 4);
+				memcpy(out, &atlas[((ty + y) * w + tx) / 2], 4);
 				out += 4;
 			}
 		}
 	}
+	free(atlas);
 	DCFlushRange(buf, w * h / 2);
 	return buf;
 }
