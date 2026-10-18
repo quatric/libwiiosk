@@ -116,9 +116,20 @@ static void emit(osk_keyboard *osk, osk_event ev)
 		osk->cfg.on_event(osk, ev, osk->cfg.user);
 }
 
+void (*osk_sound_hook)(osk_sound sound) = NULL;
+
+static void sound(osk_keyboard *osk, osk_sound s)
+{
+	if (osk->cfg.on_sound)
+		osk->cfg.on_sound(osk, s, osk->cfg.user);
+	else if (osk_sound_hook)
+		osk_sound_hook(s);
+}
+
 static void reject(osk_keyboard *osk)
 {
 	emit(osk, OSK_EVENT_REJECT);
+	sound(osk, OSK_SOUND_ERROR);
 }
 
 bool osk_accepts(const osk_keyboard *osk, uint32_t cp)
@@ -151,6 +162,16 @@ static void ensure_caret_visible(osk_keyboard *osk)
 		osk->scroll = n > OSK_TEXT_LINES ? n - OSK_TEXT_LINES : 0;
 }
 
+/* insert at the caret without any checks */
+static void put_char(osk_keyboard *osk, uint32_t cp)
+{
+	memmove(&osk->text[osk->caret + 1], &osk->text[osk->caret],
+		(osk->len - osk->caret) * sizeof(uint32_t));
+	osk->text[osk->caret++] = cp;
+	osk->len++;
+	osk->utf8_dirty = true;
+}
+
 static bool insert_char(osk_keyboard *osk, uint32_t cp)
 {
 	if (cp == 0xA0)
@@ -159,11 +180,8 @@ static bool insert_char(osk_keyboard *osk, uint32_t cp)
 		reject(osk);
 		return false;
 	}
-	memmove(&osk->text[osk->caret + 1], &osk->text[osk->caret],
-		(osk->len - osk->caret) * sizeof(uint32_t));
-	osk->text[osk->caret++] = cp;
-	osk->len++;
-	osk->utf8_dirty = true;
+	put_char(osk, cp);
+	sound(osk, OSK_SOUND_INPUT);
 	return true;
 }
 
@@ -178,6 +196,7 @@ static void backspace(osk_keyboard *osk)
 	osk->caret--;
 	osk->len--;
 	osk->utf8_dirty = true;
+	sound(osk, OSK_SOUND_DELETE);
 }
 
 static void delete_char(osk_keyboard *osk)
@@ -190,6 +209,7 @@ static void delete_char(osk_keyboard *osk)
 		(osk->len - osk->caret - 1) * sizeof(uint32_t));
 	osk->len--;
 	osk->utf8_dirty = true;
+	sound(osk, OSK_SOUND_DELETE);
 }
 
 static void confirm(osk_keyboard *osk)
@@ -199,6 +219,7 @@ static void confirm(osk_keyboard *osk)
 		return;
 	}
 	osk->status = OSK_STATUS_DONE;
+	sound(osk, OSK_SOUND_OK);
 	emit(osk, OSK_EVENT_DONE);
 }
 
@@ -207,6 +228,7 @@ static void cancel(osk_keyboard *osk)
 	if (osk->cfg.flags & OSK_FLAG_NO_CANCEL)
 		return;
 	osk->status = OSK_STATUS_CANCELLED;
+	sound(osk, OSK_SOUND_CANCEL);
 	emit(osk, OSK_EVENT_CANCEL);
 }
 
@@ -245,6 +267,7 @@ static void caret_line(osk_keyboard *osk, int dir)
 		}
 	}
 	osk->caret = best;
+	sound(osk, OSK_SOUND_SCROLL);
 }
 
 static void set_focus(osk_keyboard *osk, int key)
@@ -252,8 +275,10 @@ static void set_focus(osk_keyboard *osk, int key)
 	if (key == osk->focus)
 		return;
 	osk->focus = key;
-	if (key >= 0)
+	if (key >= 0) {
 		emit(osk, OSK_EVENT_FOCUS);
+		sound(osk, OSK_SOUND_FOCUS);
+	}
 }
 
 static int key_at(const osk_keyboard *osk, float x, float y)
@@ -352,6 +377,7 @@ static void switch_page(osk_keyboard *osk, bool numpad)
 
 	if (osk->numpad == numpad)
 		return;
+	sound(osk, numpad ? OSK_SOUND_NUMPAD : OSK_SOUND_LETTERS);
 	osk->numpad = numpad;
 	osk->shift = osk->caps = osk->alt = false;
 	osk_build_keys(osk);
@@ -439,6 +465,7 @@ static void scroll_candidates(osk_keyboard *osk, int dir)
 		reject(osk);
 		return;
 	}
+	sound(osk, OSK_SOUND_SCROLL);
 	rebuild_bar(osk);
 }
 
@@ -463,7 +490,8 @@ static bool choose_candidate(osk_keyboard *osk, unsigned i)
 	if (osk->caret < osk->len && osk->text[osk->caret] == ' ')
 		osk->caret++;
 	else if (osk->len < osk->max_chars && osk_accepts(osk, ' '))
-		insert_char(osk, ' ');
+		put_char(osk, ' ');
+	sound(osk, OSK_SOUND_CANDIDATE);
 	refresh_prediction(osk, false);
 	ensure_caret_visible(osk);
 	return true;
@@ -472,7 +500,28 @@ static bool choose_candidate(osk_keyboard *osk, unsigned i)
 static void toggle_prediction(osk_keyboard *osk)
 {
 	osk->predict = !osk->predict;
+	sound(osk, osk->predict ? OSK_SOUND_PREDICT_ON : OSK_SOUND_PREDICT_OFF);
 	refresh_prediction(osk, true);
+}
+
+static void toggle_shift(osk_keyboard *osk, bool *latch)
+{
+	*latch = !*latch;
+	sound(osk, *latch ? OSK_SOUND_SHIFT_ON : OSK_SOUND_SHIFT_OFF);
+}
+
+static void toggle_more(osk_keyboard *osk)
+{
+	osk->alt = !osk->alt;
+	sound(osk, osk->alt ? OSK_SOUND_MORE : OSK_SOUND_BACK);
+}
+
+static void move_caret(osk_keyboard *osk, unsigned to)
+{
+	if (to == osk->caret)
+		return;
+	osk->caret = to;
+	sound(osk, OSK_SOUND_CARET);
 }
 
 static void press_key(osk_keyboard *osk, int idx, bool repeat)
@@ -500,13 +549,13 @@ static void press_key(osk_keyboard *osk, int idx, bool repeat)
 		enter(osk);
 		break;
 	case KEY_SHIFT:
-		osk->shift = !osk->shift;
+		toggle_shift(osk, &osk->shift);
 		break;
 	case KEY_CAPS:
-		osk->caps = !osk->caps;
+		toggle_shift(osk, &osk->caps);
 		break;
 	case KEY_ALT:
-		osk->alt = !osk->alt;
+		toggle_more(osk);
 		break;
 	case KEY_OK:
 		confirm(osk);
@@ -574,6 +623,7 @@ static bool pointer_textbox(osk_keyboard *osk)
 		}
 	}
 	osk->caret = best;
+	sound(osk, OSK_SOUND_CARET_FIX);
 	return true;
 }
 
@@ -637,6 +687,7 @@ osk_keyboard *OSK_Create(const osk_config *cfg)
 	osk->keys[osk->focus].focus = 1;
 
 	OSK_SetText(osk, cfg->initial);
+	sound(osk, OSK_SOUND_OPEN);
 	return osk;
 }
 
@@ -790,14 +841,14 @@ osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 	if (fire & OSK_BTN_BACKSPACE)	backspace(osk);
 	if (fire & OSK_BTN_DELETE)	delete_char(osk);
 	if ((fire & OSK_BTN_CARET_LEFT) && osk->caret)
-		osk->caret--;
+		move_caret(osk, osk->caret - 1);
 	if ((fire & OSK_BTN_CARET_RIGHT) && osk->caret < osk->len)
-		osk->caret++;
-	if (fire & OSK_BTN_CARET_HOME)	osk->caret = 0;
-	if (fire & OSK_BTN_CARET_END)	osk->caret = osk->len;
-	if (fire & OSK_BTN_SHIFT)	osk->shift = !osk->shift;
+		move_caret(osk, osk->caret + 1);
+	if (fire & OSK_BTN_CARET_HOME)	move_caret(osk, 0);
+	if (fire & OSK_BTN_CARET_END)	move_caret(osk, osk->len);
+	if (fire & OSK_BTN_SHIFT)	toggle_shift(osk, &osk->shift);
 	if ((fire & OSK_BTN_ALT) && !osk->numpad)
-		osk->alt = !osk->alt;
+		toggle_more(osk);
 	if (fire & OSK_BTN_SPACE)	insert_char(osk, ' ');
 	if (fire & OSK_BTN_UP)		move_focus(osk, 0, -1);
 	if (fire & OSK_BTN_DOWN)	move_focus(osk, 0, 1);

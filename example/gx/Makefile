@@ -15,7 +15,7 @@ BUILD		:=	build
 
 CFLAGS		:=	-g -O2 -Wall $(MACHDEP) -I$(OSKDIR)/include -I$(LIBOGC_INC)
 LDFLAGS		:=	-g $(MACHDEP) -Wl,-Map,$(BUILD)/$(TARGET).map
-LIBS		:=	-L$(OSKDIR)/lib -L$(LIBOGC_LIB) -lwiiosk -lwiikeyboard -lwiiuse -lbte -logc -lm
+LIBS		:=	-L$(OSKDIR)/lib -L$(LIBOGC_LIB) -lwiiosk -lwiikeyboard -lasnd -lwiiuse -lbte -logc -lm
 
 CFILES		:=	$(wildcard source/*.c)
 OFILES		:=	$(patsubst source/%.c,$(BUILD)/%.o,$(CFILES))

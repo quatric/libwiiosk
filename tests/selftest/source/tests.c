@@ -94,6 +94,76 @@ static bool has_candidate(osk_keyboard *osk, const char *want)
 	return false;
 }
 
+static osk_sound sounds[16];
+static unsigned nsounds;
+
+static void on_sound(osk_keyboard *osk, osk_sound snd, void *user)
+{
+	if (nsounds < 16)
+		sounds[nsounds] = snd;
+	nsounds++;
+}
+
+/* the sounds since the last call, as a string of their numbers + 'a' */
+static bool heard(const char *want)
+{
+	char got[17];
+	unsigned i;
+
+	for (i = 0; i < nsounds && i < 16; i++)
+		got[i] = 'a' + sounds[i];
+	got[i] = 0;
+	nsounds = 0;
+	return !strcmp(got, want);
+}
+
+#define S(x)	((char)('a' + OSK_SOUND_##x))
+
+static void sound_tests(void)
+{
+	osk_config cfg;
+	osk_keyboard *osk;
+	osk_sound_data d;
+	char want[8];
+	unsigned i, total = 0;
+	bool ok = true;
+
+	OSK_DefaultConfig(&cfg);
+	cfg.on_sound = on_sound;
+	cfg.max_chars = 2;
+	nsounds = 0;
+	osk = OSK_Create(&cfg);
+	check(heard((char[]){ S(OPEN), 0 }), "sound open");
+	type(osk, "abc");
+	check(heard((char[]){ S(INPUT), S(INPUT), S(ERROR), 0 }), "sound input");
+	step(osk, OSK_BTN_BACKSPACE, 0);
+	step(osk, OSK_BTN_CARET_LEFT, 0);
+	check(heard((char[]){ S(DELETE), S(CARET), 0 }), "sound delete, caret");
+	step(osk, OSK_BTN_BACKSPACE, 0);
+	check(heard((char[]){ S(ERROR), 0 }), "sound backspace refused");
+	step(osk, OSK_BTN_SHIFT, 0);
+	step(osk, OSK_BTN_SHIFT, 0);
+	step(osk, OSK_BTN_ALT, 0);
+	step(osk, OSK_BTN_ALT, 0);
+	want[0] = S(SHIFT_ON); want[1] = S(SHIFT_OFF); want[2] = S(MORE); want[3] = S(BACK); want[4] = 0;
+	check(heard(want), "sound shift, more");
+	step(osk, OSK_BTN_RIGHT, 0);
+	click(osk, 352, 424);				/* numpad tab */
+	want[0] = S(FOCUS); want[1] = S(FOCUS); want[2] = S(NUMPAD); want[3] = 0;
+	check(heard(want), "sound focus, tab");
+	step(osk, OSK_BTN_CONFIRM, 0);
+	check(heard((char[]){ S(OK), 0 }), "sound ok");
+	OSK_Destroy(osk);
+
+	for (i = 0; i < OSK_SOUND_COUNT; i++) {
+		if (!OSK_GetSound(i, &d) || !d.samples || d.rate < 8000)
+			ok = false;
+		else
+			total += d.samples * 1000 / d.rate;
+	}
+	check(ok && total > 4000 && !OSK_GetSound(OSK_SOUND_COUNT, &d), "sound data");
+}
+
 static void prediction_tests(void)
 {
 	static u8 junk[4096], cut[5000];
@@ -393,4 +463,5 @@ void run_tests(void)
 	      !OSK_CanDisplay(0x3042) && !OSK_CanDisplay('\n'), "font coverage");
 
 	prediction_tests();
+	sound_tests();
 }

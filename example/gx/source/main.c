@@ -117,6 +117,7 @@ int main(int argc, char **argv)
 	WPAD_SetDataFormat(WPAD_CHAN_0, WPAD_FMT_BTNS_ACC_IR);
 	WPAD_SetVRes(WPAD_CHAN_0, rmode->fbWidth, rmode->efbHeight);
 	OSK_InitUSBKeyboard();	/* optional */
+	OSK_InitSound(true);	/* optional, -lasnd */
 	widescreen = CONF_GetAspectRatio() == CONF_ASPECT_16_9;
 
 	for (;;) {

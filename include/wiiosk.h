@@ -87,6 +87,31 @@ typedef enum {
 	OSK_EVENT_CANCEL
 } osk_event;
 
+/* Sound effects of the Wii keyboard, delivered through osk_config.on_sound
+   or played by OSK_InitSound(). */
+typedef enum {
+	OSK_SOUND_FOCUS = 0,	/* the highlighted key changed */
+	OSK_SOUND_INPUT,	/* a character was typed */
+	OSK_SOUND_DELETE,	/* Backspace / Delete */
+	OSK_SOUND_ERROR,	/* input refused */
+	OSK_SOUND_CARET,	/* caret moved by a button */
+	OSK_SOUND_CARET_FIX,	/* caret placed with the pointer */
+	OSK_SOUND_CANDIDATE,	/* a suggested word was chosen */
+	OSK_SOUND_SCROLL,	/* candidate bar or text box scrolled */
+	OSK_SOUND_SHIFT_ON,	/* Shift or Caps latched */
+	OSK_SOUND_SHIFT_OFF,
+	OSK_SOUND_MORE,		/* More page opened */
+	OSK_SOUND_BACK,		/* back from the More page */
+	OSK_SOUND_PREDICT_ON,
+	OSK_SOUND_PREDICT_OFF,
+	OSK_SOUND_LETTERS,	/* letters tab */
+	OSK_SOUND_NUMPAD,	/* numpad tab */
+	OSK_SOUND_OPEN,		/* keyboard created */
+	OSK_SOUND_OK,		/* text accepted */
+	OSK_SOUND_CANCEL,
+	OSK_SOUND_COUNT
+} osk_sound;
+
 /* RGBA8 colors, 0xRRGGBBAA. The keyboard is drawn with the look of the
    Wii system keyboard; only these fields still have an effect:
      panel		background
@@ -135,6 +160,10 @@ typedef struct {
 	   pages and, while it is on, a bar of suggested words above the keys.
 	   NULL disables prediction. Never used with OSK_FLAG_PASSWORD. */
 	const osk_dictionary *dictionary;
+
+	/* Since 2.1. Called for every sound effect. When NULL, the sound is
+	   played through ASND if OSK_InitSound() succeeded. */
+	void (*on_sound)(osk_keyboard *osk, osk_sound sound, void *user);
 } osk_config;
 
 /* Abstract buttons understood by OSK_Update(). */
@@ -218,6 +247,25 @@ void OSK_Resume(osk_keyboard *osk);
    Returns OSK_STATUS_DONE or OSK_STATUS_CANCELLED. */
 osk_status OSK_Prompt(const osk_config *cfg, GXRModeObj *rmode, void *xfb,
 		      char *out, size_t out_size);
+
+/* Optional sound effects (about 48 KB of compressed audio, linked only
+   if one of these functions is used). OSK_InitSound() plays them through
+   ASND (link -lasnd); pass true to have it call ASND_Init() as well.
+   Each sound is decoded on first use (about 190 KB for all of them). */
+bool OSK_InitSound(bool init_asnd);
+void OSK_ShutdownSound(void);
+void OSK_SetSoundVolume(u8 volume);		/* 0..255, default 255 */
+
+/* For apps with their own mixer: native (big-endian) s16 mono samples. Vary the
+   pitch randomly by up to +-jitter_cents for each play to sound like
+   the system keyboard. The data stays valid until exit. */
+typedef struct {
+	const s16 *pcm;
+	unsigned samples;
+	unsigned rate;			/* Hz */
+	unsigned jitter_cents;
+} osk_sound_data;
+bool OSK_GetSound(osk_sound sound, osk_sound_data *out);
 
 /* Fill d from .zsd / .znd files loaded by the app (e.g. from SD); the
    buffers must stay valid while a keyboard uses them. znd may be NULL.

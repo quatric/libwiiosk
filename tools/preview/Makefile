@@ -5,7 +5,8 @@ CFLAGS	?= -O2 -g
 CFLAGS	+= -Wall -Wextra -Wno-unused-parameter -Iinclude -I../../include -I../../source
 LIBSRC	:= ../../source/osk_core.c ../../source/osk_layouts.c ../../source/osk_text.c \
 	   ../../source/osk_render.c ../../source/osk_gfx.c ../../source/osk_font_data.c \
-	   ../../source/osk_predict.c $(wildcard ../../source/dict/*.c)
+	   ../../source/osk_predict.c $(wildcard ../../source/dict/*.c) \
+	   ../../source/osk_sound.c ../../source/osk_sound_data.c
 HOSTSRC	:= soft.c png.c
 
 all: wiiosk_preview wiiosk_selftest wiiosk_texdump

@@ -10,6 +10,8 @@ On-screen software keyboard library for Wii homebrew, built on libogc / GX.
 - A "More" page on every letter layout with accented Latin-1 letters, `€` and extra symbols
 - Predictive text in nine languages from the Wii keyboard's eZiText dictionaries, with a
   candidate bar like the system keyboard's; only the languages you reference are linked
+- The system keyboard's sound effects (19 sounds, 48 KB), played through ASND or handed to your
+  own mixer
 - Shift (one-shot), Caps Lock, caret movement, auto-repeat, max length, password mode, optional
   line breaks
 - Input from the Wii Remote pointer and buttons, the Classic Controller, the GameCube controller and USB keyboards
@@ -33,7 +35,7 @@ make -C tests/selftest
 ```
 
 Link with `-lwiiosk -lwiiuse -lbte -logc -lm`. Add `-lwiikeyboard` only if you call
-`OSK_InitUSBKeyboard()`.
+`OSK_InitUSBKeyboard()`, and `-lasnd` only if you call `OSK_InitSound()`.
 
 ## Usage in a GX app
 
@@ -139,6 +141,25 @@ ranks the typed word itself first, then its accented forms, then the graph's ord
 the extra words (Wii, Nunchuk, …) are placed after the first three suggestions.
 `tools/mkdict.py <eZiTextTools data dir> source/dict` regenerates `source/dict/`.
 
+## Sounds
+
+```c
+OSK_InitSound(true);    /* true: also call ASND_Init(); link -lasnd */
+```
+
+After this, every keyboard plays the system keyboard's sound effects: focus ticks, typing,
+delete, refusals, caret moves, Shift, More, the tabs, prediction, opening, OK and Cancel. Typing,
+delete and choosing a word vary their pitch slightly, like the original. `OSK_SetSoundVolume()`
+sets the ASND voice volume. The sounds are decoded on first use.
+
+Apps with their own mixer set `cfg.on_sound` instead (it replaces the ASND playback) and fetch
+the samples with `OSK_GetSound()`. Those are mono s16 at 10.7, 16 or 32 kHz, with the pitch
+variation in cents. The sound data is a separate object, so apps that use neither function do not
+link it. `tools/mksound.py` renders the sounds from the keyboard's sound archive
+(`wiiSoftwareKeyboardSound.brsar`). It interprets the sequences, samples the bank's DSP-ADPCM
+instruments with their envelopes, and stores each sound at the lowest rate that keeps its sound,
+as 4-bit IMA ADPCM.
+
 ## Controls
 
 | Action        | Wii Remote | Classic | GameCube      | USB keyboard  |
@@ -160,8 +181,8 @@ at the right of the text box move the caret a line up or down.
 
 - `filter`: a callback that refuses code points, for example digits only. Keys whose character is
   refused are drawn greyed out.
-- `on_event`: a callback for focus changes, key presses, rejects, done and cancel. Use it for sounds
-  or rumble; `example/gx` uses it for Wii-Menu-style rumble.
+- `on_event`: a callback for focus changes, key presses, rejects, done and cancel. Use it for rumble;
+  `example/gx` uses it for Wii-Menu-style rumble. For sounds, see `on_sound` above.
 - `theme`: copy `*OSK_DefaultTheme()` and change the colours you want. Since 2.0 only some fields
   have an effect; `wiiosk.h` lists them.
 - Flags:
@@ -196,7 +217,7 @@ Latin-1, `Œ œ` and `€`. It does not include CJK.
 `tests/selftest` drives `OSK_Update()` with scripted input and needs no controller. It covers
 editing, max length, UTF-8, navigation and wrap, Shift and Caps, the More page, auto-repeat, 4:3 and
 16:9 pointer mapping, the caret pointer, Enter and line breaks, the toolbar buttons and tabs, the
-German and French tables, filters and flags, and word prediction (ranking, capitalisation, accents,
+German and French tables, filters and flags, the sound triggers and decoder, and word prediction (ranking, capitalisation, accents,
 the bar, scrolling, the length limit and damaged dictionaries). On the Wii the verdict appears in the text box
 (`SELFTEST PASS n/n`), then it cycles through every layout for a visual check. It runs in Dolphin.
 
@@ -220,6 +241,7 @@ tests/selftest          scripted self-test
 source/dict/            generated dictionaries, one object per language
 tools/mkfont.py         generates source/osk_font_data.c from the font
 tools/mkdict.py         generates source/dict/ from eZiText dictionaries
+tools/mksound.py        generates source/osk_sound_data.c from the keyboard's sound archive
 tools/preview           desktop build: previews and self-test
 nintendo_sdk_original/  original SDK package (local reference only, git-ignored)
 ```
@@ -237,6 +259,10 @@ Corporation that ship with the Wii keyboard (`eZTSystem*.zsd`, `eZTNintendo*.znd
 in [eZiTextTools](https://github.com/quatric/eZiTextTools). `tools/mkdict.py` keeps only the word
 graph and the blocklist. They are not covered by the zlib license. If that matters for your project,
 leave `cfg.dictionary` unset (then nothing of them is linked) or load your own dictionary.
+
+The sound effects in `source/osk_sound_data.c` are not original work either. They are rendered
+from Nintendo's `wiiSoftwareKeyboardSound.brsar` (the archive itself is not included) and are not
+covered by the zlib license. They are linked only if you call `OSK_InitSound()` or `OSK_GetSound()`.
 
 The font is FOT-Rodin NTLG Pro DB by Fontworks, the typeface used by the Wii system menu. It is a
 commercial font and is not included; `source/osk_font_data.c` holds glyph bitmaps rendered from it by
