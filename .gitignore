@@ -6,3 +6,7 @@ lib/
 .DS_Store
 # Proprietary SDK material kept only as local reference; never distribute.
 nintendo_sdk_original/
+tools/preview/wiiosk_preview
+tools/preview/wiiosk_selftest
+tools/preview/wiiosk_texdump
+*.dSYM/

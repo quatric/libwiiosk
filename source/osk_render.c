@@ -1,359 +1,469 @@
 /*-------------------------------------------------------------
-osk_render.c -- GX drawing
+osk_render.c -- the keyboard scene, drawn through the backend
+
+Positions are design-space pixels (640x480, see osk_internal.h);
+every element is a textured quad tinted by a black and a white
+material color, like the pictures of a 2D layout.
 -------------------------------------------------------------*/
-#include <stdio.h>
+#include <math.h>
 #include <string.h>
 
 #include "osk_internal.h"
 
-#define PANEL_X		16.0f
-#define PANEL_Y		34.0f
-#define PANEL_W		608.0f
-#define PANEL_H		414.0f
-#define TEXTBOX_X	32.0f
-#define TEXTBOX_Y	88.0f
-#define TEXTBOX_W	576.0f
-#define TEXTBOX_H	60.0f
-#define TEXTBOX_PAD	12.0f
-#define HINT_Y		424.0f
+/* design -> virtual screen offset, and the scale applied around a key
+   center while it is drawn */
+static float ox, oy;
+static float xf_s = 1, xf_cx, xf_cy;
 
-#define ATLAS_TEX_W	128.0f
-#define ATLAS_TEX_H	256.0f
+static const osk_color c_white = { 255, 255, 255, 255 };
+static const osk_color c_clear = { 0, 0, 0, 0 };
+static const osk_color c_none[4] = {
+	{ 255, 255, 255, 255 }, { 255, 255, 255, 255 }, { 255, 255, 255, 255 }, { 255, 255, 255, 255 },
+};
 
-/* texture coordinate inside the solid slot (slot 0) */
-#define SOLID_S		(4.0f / ATLAS_TEX_W)
-#define SOLID_T		(8.0f / ATLAS_TEX_H)
-
-static float ox, oy;	/* design -> virtual offset for the current draw */
-
-static inline void vtx(float x, float y, u32 c, float s, float t)
+static osk_color rgb(u8 r, u8 g, u8 b)
 {
-	GX_Position2f32(x + ox, y + oy);
-	GX_Color4u8(c >> 24, c >> 16, c >> 8, c);
-	GX_TexCoord2f32(s, t);
+	osk_color c = { r, g, b, 255 };
+	return c;
 }
 
-static u32 lerp_color(u32 a, u32 b, float t)
+static osk_color grey(u8 v)
 {
-	u32 out = 0;
-	int shift;
+	return rgb(v, v, v);
+}
 
-	for (shift = 24; shift >= 0; shift -= 8) {
-		float ca = (a >> shift) & 0xFF, cb = (b >> shift) & 0xFF;
-		out |= ((u32)(ca + (cb - ca) * t) & 0xFF) << shift;
+static osk_color from_u32(u32 c)
+{
+	osk_color o = { c >> 24, c >> 16, c >> 8, c };
+	return o;
+}
+
+static osk_color with_alpha(osk_color c, u8 a)
+{
+	c.a = a;
+	return c;
+}
+
+static u8 clamp8(float v)
+{
+	return v < 0 ? 0 : v > 255 ? 255 : (u8)(v + 0.5f);
+}
+
+static osk_color mix(osk_color a, osk_color b, float t)
+{
+	osk_color o = {
+		clamp8(a.r + (b.r - a.r) * t), clamp8(a.g + (b.g - a.g) * t),
+		clamp8(a.b + (b.b - a.b) * t), clamp8(a.a + (b.a - a.a) * t),
+	};
+	return o;
+}
+
+/* layout animations use hermite keys with zero slopes */
+static float smooth(float t)
+{
+	t = t < 0 ? 0 : t > 1 ? 1 : t;
+	return t * t * (3 - 2 * t);
+}
+
+static void quad(osk_tex tex, float x0, float y0, float x1, float y1,
+		 float s0, float t0, float s1, float t1,
+		 osk_color black, osk_color white, const osk_color vtx[4])
+{
+	x0 = xf_cx + (x0 - xf_cx) * xf_s + ox;
+	x1 = xf_cx + (x1 - xf_cx) * xf_s + ox;
+	y0 = xf_cy + (y0 - xf_cy) * xf_s + oy;
+	y1 = xf_cy + (y1 - xf_cy) * xf_s + oy;
+	osk_backend_quad(tex, x0, y0, x1, y1, s0, t0, s1, t1, black, white, vtx ? vtx : c_none);
+}
+
+static void pic(osk_tex tex, float x, float y, float w, float h, osk_color black, osk_color white)
+{
+	quad(tex, x, y, x + w, y + h, 0, 0, 1, 1, black, white, NULL);
+}
+
+static void pic_c(osk_tex tex, float cx, float cy, float w, float h, osk_color black, osk_color white)
+{
+	pic(tex, cx - w / 2, cy - h / 2, w, h, black, white);
+}
+
+static void vgrad(osk_color top, osk_color bottom, osk_color v[4])
+{
+	v[0] = v[1] = top;
+	v[2] = v[3] = bottom;
+}
+
+/*-------------------------------------------------------------
+  text
+-------------------------------------------------------------*/
+typedef struct {
+	osk_font_size fs;
+	osk_color top, bottom;		/* gradient over the line height */
+} text_style;
+
+/* one glyph with its pen position on the baseline of a line starting at
+   line_top; returns the advance */
+static float glyph(const text_style *st, uint32_t cp, float x, float line_top)
+{
+	const osk_glyph *g = osk_find_glyph(cp);
+	float sy = osk_glyph_scale_y(&st->fs), sx = sy * (st->fs.sx / 30.0f) / (st->fs.sy / 36.0f);
+	float base = line_top + 30.0f * st->fs.sy / 36.0f;
+	float x0, y0, x1, y1;
+	osk_color v[4];
+
+	if (!g)
+		g = osk_find_glyph('?');
+	if (g->w && g->h) {
+		x0 = x + g->left * sx;
+		y0 = base - g->top * sy;
+		x1 = x0 + g->w * sx;
+		y1 = y0 + g->h * sy;
+		vgrad(mix(st->top, st->bottom, (y0 - line_top) / st->fs.sy),
+		      mix(st->top, st->bottom, (y1 - line_top) / st->fs.sy), v);
+		quad(OSK_TEX_FONT, x0, y0, x1, y1,
+		     (float)g->x / osk_font_atlas_w, (float)g->y / osk_font_atlas_h,
+		     (float)(g->x + g->w) / osk_font_atlas_w, (float)(g->y + g->h) / osk_font_atlas_h,
+		     with_alpha(c_white, 0), c_white, v);
 	}
-	return out;
+	return g->adv16 / 16.0f * sx + st->fs.char_space;
 }
 
-static u32 with_alpha(u32 c, u32 a)
+static void text_at(const text_style *st, const char *s, float x, float line_top)
 {
-	return (c & 0xFFFFFF00) | ((c & 0xFF) * a / 255);
-}
-
-static void rect(float x, float y, float w, float h, u32 top, u32 bottom)
-{
-	GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
-	vtx(x,     y,     top,    SOLID_S, SOLID_T);
-	vtx(x + w, y,     top,    SOLID_S, SOLID_T);
-	vtx(x + w, y + h, bottom, SOLID_S, SOLID_T);
-	vtx(x,     y + h, bottom, SOLID_S, SOLID_T);
-	GX_End();
-}
-
-/* Rectangle with chamfered corners and a vertical gradient. */
-static void box(float x, float y, float w, float h, float r, u32 top, u32 bottom)
-{
-	const float px[8] = { x + r, x + w - r, x + w, x + w, x + w - r, x + r, x, x };
-	const float py[8] = { y, y, y + r, y + h - r, y + h, y + h, y + h - r, y + r };
-	int i;
-
-	GX_Begin(GX_TRIANGLEFAN, GX_VTXFMT0, 10);
-	vtx(x + w / 2, y + h / 2, lerp_color(top, bottom, 0.5f), SOLID_S, SOLID_T);
-	for (i = 0; i <= 8; i++) {
-		int j = i & 7;
-		vtx(px[j], py[j], lerp_color(top, bottom, (py[j] - y) / h), SOLID_S, SOLID_T);
-	}
-	GX_End();
-}
-
-static void glyph(float x, float y, uint32_t cp, float scale, u32 color)
-{
-	unsigned slot = osk_font_slot(cp);
-	float s0 = (slot % 16) * OSK_GLYPH_W / ATLAS_TEX_W;
-	float t0 = (slot / 16) * OSK_GLYPH_H / ATLAS_TEX_H;
-	float s1 = s0 + OSK_GLYPH_W / ATLAS_TEX_W;
-	float t1 = t0 + OSK_GLYPH_H / ATLAS_TEX_H;
-	float w = OSK_GLYPH_W * scale, h = OSK_GLYPH_H * scale;
-
-	GX_Begin(GX_QUADS, GX_VTXFMT0, 4);
-	vtx(x,     y,     color, s0, t0);
-	vtx(x + w, y,     color, s1, t0);
-	vtx(x + w, y + h, color, s1, t1);
-	vtx(x,     y + h, color, s0, t1);
-	GX_End();
-}
-
-static unsigned text_len(const char *s)
-{
-	unsigned n = 0;
 	uint32_t cp;
 	size_t k;
 
 	while ((k = OSK_UTF8Decode(s, &cp)) != 0) {
-		s += k;
-		n++;
-	}
-	return n;
-}
-
-static void text(float x, float y, const char *s, float scale, u32 color)
-{
-	uint32_t cp;
-	size_t k;
-
-	while ((k = OSK_UTF8Decode(s, &cp)) != 0) {
-		glyph(x, y, cp, scale, color);
-		x += OSK_GLYPH_W * scale;
+		x += glyph(st, cp, x, line_top);
 		s += k;
 	}
 }
 
-static void text_centered(float cx, float cy, const char *s, float scale, u32 color)
+static void text_centered(const text_style *st, const char *s, float cx, float cy)
 {
-	float w = text_len(s) * OSK_GLYPH_W * scale;
-	text(cx - w / 2, cy - OSK_GLYPH_H * scale / 2, s, scale, color);
+	text_at(st, s, cx - osk_utf8_width(s, &st->fs) / 2, cy - st->fs.sy / 2);
 }
 
-void osk_textbox_rect(const osk_keyboard *osk, float *x, float *y, float *w, float *h)
+static void char_centered(const text_style *st, uint32_t cp, float cx, float cy)
 {
-	(void)osk;
-	*x = TEXTBOX_X;
-	*y = TEXTBOX_Y;
-	*w = TEXTBOX_W;
-	*h = TEXTBOX_H;
+	char buf[5] = { 0 };
+
+	OSK_UTF8Encode(cp, buf);
+	text_centered(st, buf, cx, cy);
 }
 
-unsigned osk_textbox_visible_chars(const osk_keyboard *osk)
+/*-------------------------------------------------------------
+  background and toolbar
+-------------------------------------------------------------*/
+/* vertical gradient quad spanning [y0, y1] whose colors are given at
+   ya and yb, extrapolated outside */
+static void band(float x0, float x1, float y0, float y1, float ya, osk_color ca,
+		 float yb, osk_color cb, osk_color tint)
 {
-	(void)osk;
-	return (unsigned)((TEXTBOX_W - 2 * TEXTBOX_PAD) / (OSK_GLYPH_W * OSK_TEXT_SCALE));
+	osk_color v[4];
+
+	vgrad(mix(ca, cb, (y0 - ya) / (yb - ya)), mix(ca, cb, (y1 - ya) / (yb - ya)), v);
+	quad(OSK_TEX_WHITE, x0, y0, x1, y1, 0, 0, 1, 1, c_clear, tint, v);
 }
 
-static void setup_gx(osk_keyboard *osk)
+static void draw_background(osk_keyboard *osk)
 {
-	Mtx44 proj;
-	Mtx view;
+	osk_color panel = from_u32(osk->theme.panel);
+	osk_color black = mix(with_alpha(c_clear, 255), panel, 246 / 255.0f);
+	float x0 = -ox, x1 = osk->vw - ox;
+	osk_color bar0 = { 255, 255, 255, 32 }, bar1 = { 255, 255, 255, 160 };
 
-	guOrtho(proj, 0, osk->vh, 0, osk->vw, 0, 1000.0f);
-	GX_LoadProjectionMtx(proj, GX_ORTHOGRAPHIC);
-	guMtxIdentity(view);
-	guMtxTransApply(view, view, 0.0f, 0.0f, -100.0f);
-	GX_LoadPosMtxImm(view, GX_PNMTX0);
-	GX_SetCurrentMtx(GX_PNMTX0);
+	black.a = 255;
+	/* soft stripes: an 8 texel stripe pattern stretched over (14,6) 612x464 */
+	quad(OSK_TEX_STRIPES, x0, 0, x1, OSK_DESIGN_H,
+	     0, (0 - 6) / 464.0f, 1, (OSK_DESIGN_H - 6) / 464.0f, black, panel, NULL);
 
-	GX_ClearVtxDesc();
-	GX_SetVtxDesc(GX_VA_POS, GX_DIRECT);
-	GX_SetVtxDesc(GX_VA_CLR0, GX_DIRECT);
-	GX_SetVtxDesc(GX_VA_TEX0, GX_DIRECT);
-	GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_POS, GX_POS_XY, GX_F32, 0);
-	GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_CLR0, GX_CLR_RGBA, GX_RGBA8, 0);
-	GX_SetVtxAttrFmt(GX_VTXFMT0, GX_VA_TEX0, GX_TEX_ST, GX_F32, 0);
-	GX_InvVtxCache();
-
-	GX_SetNumChans(1);
-	GX_SetChanCtrl(GX_COLOR0A0, GX_DISABLE, GX_SRC_REG, GX_SRC_VTX, GX_LIGHTNULL, GX_DF_NONE, GX_AF_NONE);
-	GX_SetNumTexGens(1);
-	GX_SetTexCoordGen(GX_TEXCOORD0, GX_TG_MTX2x4, GX_TG_TEX0, GX_IDENTITY);
-	GX_SetNumTevStages(1);
-	GX_SetTevOrder(GX_TEVSTAGE0, GX_TEXCOORD0, GX_TEXMAP0, GX_COLOR0A0);
-	GX_SetTevOp(GX_TEVSTAGE0, GX_MODULATE);
-	GX_InvalidateTexAll();
-	GX_LoadTexObj(osk_font_texture(), GX_TEXMAP0);
-
-	GX_SetBlendMode(GX_BM_BLEND, GX_BL_SRCALPHA, GX_BL_INVSRCALPHA, GX_LO_CLEAR);
-	GX_SetAlphaCompare(GX_ALWAYS, 0, GX_AOP_AND, GX_ALWAYS, 0);
-	GX_SetZMode(GX_FALSE, GX_ALWAYS, GX_FALSE);
-	GX_SetCullMode(GX_CULL_NONE);
-	GX_SetColorUpdate(GX_TRUE);
-	GX_SetAlphaUpdate(GX_TRUE);
+	/* toolbar: light blue wash from y=130, darker blue band from y=394 */
+	band(x0, x1, 130, OSK_DESIGN_H, 130, bar0, 472, bar1, rgb(0, 182, 255));
+	band(x0, x1, 394, OSK_DESIGN_H, 394, (osk_color){ 128, 168, 203, 96 },
+	     472, (osk_color){ 10, 135, 177, 255 }, c_white);
 }
 
-static bool key_latched(const osk_keyboard *osk, const osk_key *k)
+/*-------------------------------------------------------------
+  text box
+-------------------------------------------------------------*/
+/* window with one corner texture mirrored into all four corners; the
+   edges stretch the corner's last texel row or column */
+static void window(osk_tex tex, float c, float x, float y, float w, float h,
+		   osk_color black, osk_color white)
 {
-	switch (k->kind) {
-	case KEY_SHIFT:	return osk->shift;
-	case KEY_CAPS:	return osk->caps;
-	case KEY_ALT:	return osk->alt;
-	default:	return false;
-	}
-}
+	float e = (c - 0.5f) / c;
 
-static void draw_key(osk_keyboard *osk, int idx)
-{
-	const osk_theme *th = &osk->theme;
-	const osk_key *k = &osk->keys.keys[idx];
-	bool focused = idx == osk->focus;
-	bool pressed = idx == osk->flash_key && osk->flash_time > 0;
-	bool latched = key_latched(osk, k);
-	bool special = k->kind != KEY_CHAR && k->kind != KEY_SPACE;
-	float x = k->x + 2, y = k->y + 2, w = k->w - 4, h = k->h - 6;
-	u32 top, bottom, label_color = th->key_text;
-	const char *label;
-
-	if (focused) {
-		top = th->focus_top;
-		bottom = th->focus_bottom;
-	} else if (latched) {
-		top = lerp_color(th->active, 0xFFFFFFFF, 0.35f);
-		bottom = th->active;
-	} else if (special) {
-		top = th->special_top;
-		bottom = th->special_bottom;
-	} else {
-		top = th->key_top;
-		bottom = th->key_bottom;
-	}
-
-	if (pressed) {
-		y += 2;
-		top = lerp_color(top, bottom, 0.6f);
-	} else {
-		box(x, y + 3, w, h, 6, 0x00000038, 0x00000038);	/* drop shadow */
-	}
-	box(x, y, w, h, 6, top, bottom);
-
-	if (k->kind == KEY_CHAR) {
-		uint32_t cp = osk_key_char(osk, k);
-		if (!osk_accepts(osk, cp))
-			label_color = th->key_text_disabled;
-		glyph(x + w / 2 - OSK_GLYPH_W, y + h / 2 - OSK_GLYPH_H, cp, 2.0f, label_color);
-		return;
-	}
-
-	label = osk_key_label(osk, k);
-	if (k->kind == KEY_SPACE) {
-		if (!osk_accepts(osk, ' '))
-			label_color = th->key_text_disabled;
-		label_color = with_alpha(label_color, 0x80);
-	}
-	if (latched && !focused)
-		label_color = 0xFFFFFFFF;
-	if (label)
-		text_centered(x + w / 2, y + h / 2, label,
-			      (k->kind == KEY_LEFT || k->kind == KEY_RIGHT) ? 2.0f : 1.0f, label_color);
+	quad(OSK_TEX_WHITE, x + c, y + c, x + w - c, y + h - c, 0, 0, 1, 1, c_clear, c_white, NULL);
+	quad(tex, x, y, x + c, y + c, 0, 0, 1, 1, black, white, NULL);
+	quad(tex, x + w - c, y, x + w, y + c, 1, 0, 0, 1, black, white, NULL);
+	quad(tex, x, y + h - c, x + c, y + h, 0, 1, 1, 0, black, white, NULL);
+	quad(tex, x + w - c, y + h - c, x + w, y + h, 1, 1, 0, 0, black, white, NULL);
+	quad(tex, x + c, y, x + w - c, y + c, e, 0, e, 1, black, white, NULL);
+	quad(tex, x + c, y + h - c, x + w - c, y + h, e, 1, e, 0, black, white, NULL);
+	quad(tex, x, y + c, x + c, y + h - c, 0, e, 1, e, black, white, NULL);
+	quad(tex, x + w - c, y + c, x + w, y + h - c, 1, e, 0, e, black, white, NULL);
 }
 
 static void draw_textbox(osk_keyboard *osk)
 {
 	const osk_theme *th = &osk->theme;
-	float x = TEXTBOX_X, y = TEXTBOX_Y;
-	float cw = OSK_GLYPH_W * OSK_TEXT_SCALE;
-	unsigned visible = osk_textbox_visible_chars(osk);
-	u32 border = th->textbox_border;
-	unsigned i;
+	osk_color frame = from_u32(th->textbox_border);
+	unsigned start[OSK_MAX_CHARS + 2], n, line, i, caret_line;
+	text_style st = { osk_text_font, from_u32(th->text), from_u32(th->text) };
+	osk_color grey_arrow = grey(128);
 
-	if (osk->reject_time > 0) {
-		x += (osk->reject_time & 2) ? 3.0f : -3.0f;
-		border = 0xE04040FF;
+	window(OSK_TEX_FRAME_THICK, 16, 39, 30.33f, 556, 100, with_alpha(frame, 0), c_white);
+	window(OSK_TEX_FRAME_THIN, 8, 46, 36.83f, 542, 87, with_alpha(frame, 0), c_white);
+
+	if (!osk->len && osk->cfg.title && osk->cfg.title[0]) {
+		osk_color t = from_u32(th->title);
+		text_style ph = { { 25, 30, -1 }, t, mix(t, c_white, 6 / 255.0f) };
+		text_at(&ph, osk->cfg.title, 52, 46.33f);
 	}
 
-	box(x, y, TEXTBOX_W, TEXTBOX_H, 8, border, border);
-	box(x + 3, y + 3, TEXTBOX_W - 6, TEXTBOX_H - 6, 6, th->textbox, lerp_color(th->textbox, 0xE0E4E8FF, 0.5f));
-
-	for (i = 0; i < visible && osk->scroll + i < osk->len; i++) {
-		uint32_t cp = osk->text[osk->scroll + i];
-		if (osk->cfg.flags & OSK_FLAG_PASSWORD)
-			cp = '*';
-		glyph(x + TEXTBOX_PAD + i * cw, y + (TEXTBOX_H - OSK_GLYPH_H * OSK_TEXT_SCALE) / 2,
-		      cp, OSK_TEXT_SCALE, th->text);
+	n = osk_wrap_text(osk, start);
+	for (line = osk->scroll; line < n && line < osk->scroll + OSK_TEXT_LINES; line++) {
+		float x = OSK_TEXT_X, top = OSK_TEXT_Y + (line - osk->scroll) * OSK_TEXT_LINE_H;
+		for (i = start[line]; i < start[line + 1]; i++) {
+			uint32_t cp = osk_display_char(osk, i);
+			if (cp != '\n')
+				x += glyph(&st, cp, x, top);
+		}
 	}
 
-	/* scroll markers */
+	/* caret: red bar pulsing at 8 degrees per frame */
+	caret_line = osk_line_of(start, n, osk->caret);
+	if (caret_line >= osk->scroll && caret_line < osk->scroll + OSK_TEXT_LINES) {
+		float x = OSK_TEXT_X + osk_caret_x(osk, start, caret_line, osk->caret);
+		float top = OSK_TEXT_Y + (caret_line - osk->scroll) * OSK_TEXT_LINE_H;
+		float a = sinf(osk->frame * 8.0f * (float)M_PI / 180.0f) * 127 + 127;
+
+		pic(OSK_TEX_WHITE, x - 2, top + 2, 4, OSK_TEXT_LINE_H - 4, c_clear,
+		    with_alpha(from_u32(th->caret), clamp8(a * (th->caret & 0xFF) / 255.0f)));
+	}
+
+	/* scroll arrows while the text is longer than the box */
 	if (osk->scroll > 0)
-		glyph(x + 2, y + TEXTBOX_H / 2 - 8, 0x11, 1.0f, th->caret);
-	if (osk->scroll + visible < osk->len)
-		glyph(x + TEXTBOX_W - 10, y + TEXTBOX_H / 2 - 8, 0x10, 1.0f, th->caret);
-
-	if ((osk->frame / 30) % 2 == 0 || osk->repeat[0] || osk->flash_time > 0) {
-		float cx = x + TEXTBOX_PAD + (osk->caret - osk->scroll) * cw - 1;
-		rect(cx, y + 12, 3, TEXTBOX_H - 24, th->caret, th->caret);
-	}
+		pic(OSK_TEX_ARROW, 546, 46, 38, 30, with_alpha(grey_arrow, 0), grey_arrow);
+	if (osk->scroll + OSK_TEXT_LINES < n)
+		quad(OSK_TEX_ARROW, 546.17f, 84.92f, 584.17f, 114.92f, 0, 1, 1, 0,
+		     with_alpha(grey_arrow, 0), grey_arrow, NULL);
 }
 
-static void draw_header(osk_keyboard *osk)
+/*-------------------------------------------------------------
+  keys
+-------------------------------------------------------------*/
+typedef struct {
+	float focus_scale, push_scale;
+	int color_peak;			/* frame of the strongest push tint */
+} look_anim;
+
+static const look_anim look_anims[] = {
+	[LOOK_CHAR]	= { 1.5f,    1.3f,    3 },
+	[LOOK_SPECIAL]	= { 1.3f,    1.15f,   3 },
+	[LOOK_SPACE]	= { 1.3f,    1.15f,   3 },
+	[LOOK_MORE]	= { 1.15f,   1.05f,   3 },
+	[LOOK_PILL]	= { 1.1229f, 1.0453f, 3 },
+	[LOOK_TAB]	= { 1.1f,    1.0f,    3 },
+	[LOOK_PAD]	= { 1.4f,    1.3f,    7 },
+};
+
+/* scale dips to push_scale 3 frames after the press and is back after 7 */
+static float push_scale(const osk_key *k, float scale)
+{
+	const look_anim *la = &look_anims[k->look];
+	float lo = scale * la->push_scale / la->focus_scale;
+
+	if (k->push < 0 || k->look == LOOK_TAB)
+		return scale;
+	if (k->push <= 3)
+		return scale + (lo - scale) * smooth(k->push / 3.0f);
+	if (k->push <= 7)
+		return lo + (scale - lo) * smooth((k->push - 3) / 4.0f);
+	return scale;
+}
+
+/* 0 -> 1 -> 0 over the push animation */
+static float push_tint(const osk_key *k)
+{
+	int peak = look_anims[k->look].color_peak;
+
+	if (k->push < 0)
+		return 0;
+	if (k->push <= peak)
+		return smooth((float)k->push / peak);
+	return 1 - smooth((float)(k->push - peak) / (OSK_PUSH_FRAMES - peak));
+}
+
+static void draw_key(osk_keyboard *osk, int idx)
 {
 	const osk_theme *th = &osk->theme;
-	char count[16];
-	const char *title = osk->cfg.title;
-	unsigned n;
+	const osk_key *k = &osk->keys[idx];
+	const look_anim *la = &look_anims[k->look];
+	float f = smooth(k->focus), p = push_tint(k);
+	float scale = push_scale(k, 1 + (la->focus_scale - 1) * f);
+	osk_color focus_white = from_u32(th->focus_top), white = c_white, black;
+	text_style st;
+	const char *label = osk_key_label(osk, k);
+	bool latched = osk_key_latched(osk, k);
 
-	if (title && *title) {
-		n = text_len(title);
-		if (n * OSK_GLYPH_W * 2 <= TEXTBOX_W - 96)
-			text(TEXTBOX_X + 4, 48, title, 2.0f, th->title);
-		else
-			text(TEXTBOX_X + 4, 64, title, 1.0f, th->title);
+	xf_s = scale;
+	xf_cx = k->cx;
+	xf_cy = k->cy;
+
+	switch (k->look) {
+	case LOOK_CHAR:
+	case LOOK_SPECIAL:
+	case LOOK_SPACE:
+		if (latched) {
+			osk_color on = from_u32(th->active);
+			white = mix(on, rgb(on.r * 220 / 255, on.g * 220 / 255, on.b), f);
+		} else {
+			white = mix(c_white, k->kind == KEY_SHIFT || k->kind == KEY_CAPS ?
+				    rgb(focus_white.r * 220 / 224, focus_white.g * 220 / 224, focus_white.b) :
+				    focus_white, f);
+		}
+		if (k->kind != KEY_SHIFT && k->kind != KEY_CAPS)
+			white.b = clamp8(white.b + ((k->look == LOOK_CHAR ? 38 : 64) - white.b) * p);
+		black = k->look == LOOK_CHAR ? rgb(138, 148, 153) : rgb(76, 146, 181);
+		pic_c(k->look == LOOK_CHAR ? OSK_TEX_GLASS_KEY :
+		      k->look == LOOK_SPACE ? OSK_TEX_GLASS_SPACE : OSK_TEX_GLASS_WIDE,
+		      k->cx, k->cy, k->w, k->h, with_alpha(black, 0), white);
+		break;
+	case LOOK_MORE:
+		black = mix(rgb(16, 72, 114), rgb(128, 220, 255), p);
+		white = mix(rgb(240, 240, 255), grey(232), p);
+		pic_c(OSK_TEX_PLATE, k->cx, k->cy, k->w, k->h, with_alpha(black, 0), white);
+		break;
+	case LOOK_PILL:
+		white.b = clamp8(255 - 95 * p);
+		pic_c(OSK_TEX_PILL, k->cx, k->cy, k->w, k->h, c_clear, white);
+		break;
+	case LOOK_TAB:
+		white = latched ? rgb(52, 190, 237) : mix(grey(160), c_white, f);
+		pic_c(OSK_TEX_TOOL, k->cx, k->cy, k->w, k->h, with_alpha(grey(40), 0), white);
+		pic_c(k->kind == KEY_TAB_LETTERS ? OSK_TEX_ICON_QWERTY : OSK_TEX_ICON_NUMPAD,
+		      k->cx, k->cy, k->w - 4, 32, with_alpha(grey(80), 0), c_white);
+		break;
+	case LOOK_PAD:
+		white.b = clamp8(255 - 127 * p);
+		pic_c(OSK_TEX_TOOL, k->cx, k->cy, k->w, k->h, c_clear, white);
+		break;
 	}
 
-	snprintf(count, sizeof(count), "%u/%u", osk->len, osk->max_chars);
-	n = strlen(count);
-	text(TEXTBOX_X + TEXTBOX_W - 4 - n * OSK_GLYPH_W, 64, count, 1.0f,
-	     osk->len >= osk->max_chars ? 0xE04040FF : th->hint);
+	/* contents */
+	switch (k->kind) {
+	case KEY_CHAR: {
+		uint32_t cp = osk_key_char(osk, k);
+		osk_color c = from_u32(osk_accepts(osk, cp) ? th->key_text : th->key_text_disabled);
+
+		if (k->look == LOOK_PAD) {
+			osk_color pc = osk_accepts(osk, cp) ? grey(72) : c;
+			text_style pad = { { 28.8f, 34.2f, 0 }, pc, pc };
+			char_centered(&pad, cp, k->cx, k->cy - 1);
+		} else {
+			text_style ch = { { 26, 27, 0 }, c, c };
+			char_centered(&ch, cp, k->cx, k->cy);
+		}
+		break;
+	}
+	case KEY_BACK:
+		if (k->look == LOOK_PAD)
+			pic_c(OSK_TEX_ICON_BACK, k->cx - 8, k->cy, 52, 26, c_clear, grey(128));
+		else
+			pic_c(OSK_TEX_ICON_BACK, k->cx, k->cy, 44, 20, c_clear, grey(128));
+		break;
+	case KEY_ENTER:
+		if (k->look == LOOK_PAD)
+			pic_c(OSK_TEX_ICON_ENTER, k->cx - 8, k->cy, 54, 40, c_clear, grey(128));
+		else
+			pic_c(OSK_TEX_ICON_ENTER, k->cx - 1, k->cy, 44, 26, c_clear, grey(128));
+		break;
+	case KEY_SHIFT:
+	case KEY_CAPS:
+		st = (text_style){ { 24, 22, 1 }, grey(64), grey(64) };
+		text_centered(&st, label, k->cx, k->cy);
+		break;
+	case KEY_SPACE:
+		st = (text_style){ { 22, 24, 0 }, grey(64), grey(64) };
+		if (!osk_accepts(osk, ' '))
+			st.top = st.bottom = from_u32(th->key_text_disabled);
+		text_centered(&st, label, k->cx + 1, k->cy);
+		break;
+	case KEY_ALT:
+		st = (text_style){ { 26, 30, 0 }, rgb(46, 46, 174), rgb(42, 42, 154) };
+		text_centered(&st, label, k->cx + 2, k->cy);
+		break;
+	case KEY_OK:
+	case KEY_CANCEL:
+		st = (text_style){ { 27, 29, -1 }, grey(0), grey(0) };
+		text_centered(&st, label, k->cx, k->cy);
+		break;
+	default:
+		break;
+	}
+
+	xf_s = 1;
 }
 
-static void draw_hints(osk_keyboard *osk)
+static bool toolbar_key(const osk_key *k)
 {
-	const char *hint = (osk->cfg.flags & OSK_FLAG_NO_CANCEL)
-		? "A: Select   B: Erase   -: Shift   1/2: Move   +: OK"
-		: "A: Select   B: Erase   -: Shift   1/2: Move   +: OK   HOME: Cancel";
+	return k->look == LOOK_PILL || k->look == LOOK_TAB;
+}
 
-	text_centered(OSK_DESIGN_W / 2, HINT_Y + 8, hint, 1.0f, osk->theme.hint);
+static bool animating(const osk_key *k)
+{
+	return k->focus > 0 || k->push >= 0;
+}
+
+/* resting keys first, then the raised ones from the least to the most
+   focused so that the highlighted key ends up on top */
+static void draw_keys(osk_keyboard *osk, bool toolbar)
+{
+	int order[OSK_MAX_KEYS], n = 0, i, j;
+
+	for (i = 0; i < osk->nkeys; i++)
+		if (toolbar_key(&osk->keys[i]) == toolbar && !animating(&osk->keys[i]))
+			draw_key(osk, i);
+	for (i = 0; i < osk->nkeys; i++) {
+		if (toolbar_key(&osk->keys[i]) != toolbar || !animating(&osk->keys[i]))
+			continue;
+		for (j = n; j > 0 && osk->keys[order[j - 1]].focus > osk->keys[i].focus; j--)
+			order[j] = order[j - 1];
+		order[j] = i;
+		n++;
+	}
+	for (i = 0; i < n; i++)
+		draw_key(osk, order[i]);
 }
 
 static void draw_pointer(osk_keyboard *osk)
 {
-	static const float shape[7][2] = {
-		{0, 0}, {0, 22}, {5, 17}, {9, 26}, {13, 24}, {9, 15}, {16, 15},
-	};
-	float x = osk->px, y = osk->py;
-	int pass, i;
-
-	for (pass = 0; pass < 2; pass++) {
-		/* pass 0: dark outline drawn enlarged, pass 1: fill */
-		float s = pass ? 1.0f : 1.25f;
-		float dx = pass ? 0.0f : -1.5f, dy = pass ? 0.0f : -2.0f;
-		u32 c = pass ? 0xFFFFFFFF : 0x202830E0;
-
-		GX_Begin(GX_TRIANGLEFAN, GX_VTXFMT0, 7);
-		for (i = 0; i < 7; i++)
-			vtx(x + dx + shape[i][0] * s, y + dy + shape[i][1] * s, c, SOLID_S, SOLID_T);
-		GX_End();
-	}
+	pic(OSK_TEX_POINTER, osk->px - 2, osk->py - 2, 32, 40, c_clear, c_white);
 }
 
 void osk_render(osk_keyboard *osk)
 {
-	const osk_theme *th = &osk->theme;
-	int i;
-
-	setup_gx(osk);
-
-	ox = 0;
-	oy = 0;
-	rect(0, 0, osk->vw, osk->vh, th->overlay, th->overlay);
+	osk_backend_begin(osk);
 
 	ox = osk->ox;
 	oy = osk->oy;
-	box(PANEL_X, PANEL_Y, PANEL_W, PANEL_H, 14, th->panel, lerp_color(th->panel, 0xC8D0D8FF, 0.5f));
+	xf_s = 1;
 
-	draw_header(osk);
+	draw_background(osk);
+	if (!(osk->cfg.flags & OSK_FLAG_LOCK_LAYOUT)) {
+		osk_color v[4];
+		vgrad(c_white, grey(224), v);
+		quad(OSK_TEX_TOOL, 250, 399, 390, 449, 0, 0, 1, 1, with_alpha(grey(126), 0), grey(231), v);
+	}
+	draw_keys(osk, true);
 	draw_textbox(osk);
-	for (i = 0; i < osk->keys.nkeys; i++)
-		draw_key(osk, i);
-	if (!(osk->cfg.flags & OSK_FLAG_NO_HINTS))
-		draw_hints(osk);
+	draw_keys(osk, false);
+
 	if (osk->pointer_valid && !(osk->cfg.flags & OSK_FLAG_NO_POINTER))
 		draw_pointer(osk);
+
+	osk_backend_end();
 }
 
 void OSK_Draw(osk_keyboard *osk)

@@ -31,7 +31,7 @@ static void usb_poll(osk_input *in)
 
 		switch (ev.symbol) {
 		case KS_Return:
-		case KS_KP_Enter:	add_button(in, OSK_BTN_CONFIRM); continue;
+		case KS_KP_Enter:	add_text(in, '\n'); continue;	/* line break or OK */
 		case KS_Escape:		add_button(in, OSK_BTN_CANCEL); continue;
 		case KS_BackSpace:	add_button(in, OSK_BTN_BACKSPACE); continue;
 		case KS_Delete:

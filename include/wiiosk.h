@@ -16,33 +16,37 @@ warranty. See LICENSE for the full zlib license text.
 extern "C" {
 #endif
 
-#define WIIOSK_VERSION_MAJOR	1
+#define WIIOSK_VERSION_MAJOR	2
 #define WIIOSK_VERSION_MINOR	0
 #define WIIOSK_VERSION_PATCH	0
-#define WIIOSK_VERSION_STRING	"1.0.0"
+#define WIIOSK_VERSION_STRING	"2.0.0"
 
 /* Hard upper bound for the number of characters (code points) in the buffer. */
 #define OSK_MAX_CHARS		256
 
 typedef struct osk_keyboard osk_keyboard;
 
-/* Key arrangement. Every letter layout also has an "Alt" page with accented
-   Latin-1 letters and extra symbols. */
+/* Key arrangement. Every letter layout also has a "More" page with accented
+   Latin-1 letters and extra symbols. The toolbar tabs switch between the
+   letter layout and the numpad unless OSK_FLAG_LOCK_LAYOUT is set. */
 typedef enum {
 	OSK_LAYOUT_QWERTY = 0,	/* US English */
 	OSK_LAYOUT_QWERTZ,	/* German */
 	OSK_LAYOUT_AZERTY,	/* French */
-	OSK_LAYOUT_NUMPAD	/* digits, '.', '-' */
+	OSK_LAYOUT_NUMPAD	/* digits, '.', ',', '-' */
 } osk_layout;
 
 enum {
 	OSK_FLAG_PASSWORD	= 1 << 0,	/* show '*' instead of the text */
 	OSK_FLAG_WIDESCREEN	= 1 << 1,	/* 16:9 output, compensate horizontal stretch */
-	OSK_FLAG_NO_CANCEL	= 1 << 2,	/* hide Cancel key, ignore cancel buttons */
+	OSK_FLAG_NO_CANCEL	= 1 << 2,	/* hide Quit, ignore cancel buttons */
 	OSK_FLAG_REQUIRE_TEXT	= 1 << 3,	/* OK is rejected while the text is empty */
-	OSK_FLAG_NO_HINTS	= 1 << 4,	/* hide the button help line */
+	OSK_FLAG_NO_HINTS	= 1 << 4,	/* no effect since 2.0 (there is no help line) */
 	OSK_FLAG_NO_POINTER	= 1 << 5,	/* do not draw the Wii Remote pointer */
-	OSK_FLAG_GX_READY	= 1 << 6	/* OSK_Prompt(): GX was already initialised by the app */
+	OSK_FLAG_GX_READY	= 1 << 6,	/* OSK_Prompt(): GX was already initialised by the app */
+	OSK_FLAG_MULTILINE	= 1 << 7,	/* Enter inserts a line break instead of confirming */
+	OSK_FLAG_NO_ENTER	= 1 << 8,	/* hide the Enter key */
+	OSK_FLAG_LOCK_LAYOUT	= 1 << 9	/* hide the letters / numpad tabs */
 };
 
 typedef enum {
@@ -60,7 +64,17 @@ typedef enum {
 	OSK_EVENT_CANCEL
 } osk_event;
 
-/* RGBA8 colors, 0xRRGGBBAA. */
+/* RGBA8 colors, 0xRRGGBBAA. The keyboard is drawn with the look of the
+   Wii system keyboard; only these fields still have an effect:
+     panel		background
+     focus_top		tint of the highlighted key
+     active		tint of a latched Shift / Caps key
+     key_text		character key labels
+     key_text_disabled	labels of keys the filter refuses
+     textbox_border	text box frame
+     text, caret	typed text and cursor
+     title		placeholder shown while the text is empty
+   The others are kept for source compatibility and ignored. */
 typedef struct {
 	u32 overlay;		/* full-screen dim drawn behind the keyboard */
 	u32 panel;
@@ -79,7 +93,7 @@ typedef struct {
 } osk_theme;
 
 typedef struct {
-	const char *title;		/* UTF-8 prompt above the text box, may be NULL */
+	const char *title;		/* UTF-8 placeholder shown while the text box is empty, may be NULL */
 	const char *initial;		/* UTF-8 initial text, may be NULL */
 	unsigned max_chars;		/* 1..OSK_MAX_CHARS, 0 means OSK_MAX_CHARS */
 	osk_layout layout;
@@ -109,7 +123,7 @@ enum {
 	OSK_BTN_CARET_HOME	= 1 << 9,
 	OSK_BTN_CARET_END	= 1 << 10,
 	OSK_BTN_SHIFT		= 1 << 11,
-	OSK_BTN_ALT		= 1 << 12,	/* toggle accent / symbol page */
+	OSK_BTN_ALT		= 1 << 12,	/* toggle the "More" page */
 	OSK_BTN_SPACE		= 1 << 13,
 	OSK_BTN_CONFIRM		= 1 << 14,
 	OSK_BTN_CANCEL		= 1 << 15
@@ -148,9 +162,11 @@ void OSK_ShutdownUSBKeyboard(void);
 osk_status OSK_Update(osk_keyboard *osk, const osk_input *in);
 
 /* Render with GX inside the caller's frame (between clearing and
-   GX_CopyDisp). Assumes a full-screen viewport. Clobbers projection, position
-   matrix 0, vertex descriptors/format 0, TEV stage 0, texmap 0, channels,
-   blending and Z mode; re-set them before your own drawing. */
+   GX_CopyDisp). Assumes a full-screen viewport. Covers the whole screen.
+   Clobbers projection, position matrix 0, vertex descriptors/format 0, TEV
+   stages 0-1, TEV registers 0-1, texmap 0, channels, blending, alpha compare
+   and Z mode; re-set them before your own drawing. The first call builds
+   the textures (about 0.4 MB, kept until exit). */
 void OSK_Draw(osk_keyboard *osk);
 
 osk_status OSK_GetStatus(const osk_keyboard *osk);

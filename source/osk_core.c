@@ -4,31 +4,26 @@ osk_core.c -- keyboard state, text editing and input handling
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <wiiuse/wpad.h>
 
 #include "osk_internal.h"
 
-/* Set by OSK_InitUSBKeyboard() (osk_usbkbd.c) so that apps which do not
-   use a USB keyboard need not link libwiikeyboard. */
-void (*osk_usb_poll)(osk_input *in) = NULL;
-
 static const osk_theme default_theme = {
-	.overlay		= 0x000000A0,
-	.panel			= 0xE8ECF0F4,
+	.overlay		= 0x00000000,
+	.panel			= 0xFFFFFFFF,
 	.key_top		= 0xFFFFFFFF,
 	.key_bottom		= 0xDCE3EAFF,
 	.special_top		= 0xD2DAE2FF,
 	.special_bottom		= 0xB0BCC8FF,
-	.focus_top		= 0xA8E6FFFF,
-	.focus_bottom		= 0x38B4E8FF,
-	.active			= 0x38B4E8FF,
-	.key_text		= 0x303840FF,
-	.key_text_disabled	= 0xB0B8C0FF,
+	.focus_top		= 0xE0E0FFFF,
+	.focus_bottom		= 0xE0E0FFFF,
+	.active			= 0xFFFF20FF,
+	.key_text		= 0x000000FF,
+	.key_text_disabled	= 0xA8A8A8FF,
 	.textbox		= 0xFFFFFFFF,
-	.textbox_border		= 0x38B4E8FF,
-	.text			= 0x202428FF,
-	.caret			= 0x38B4E8FF,
-	.title			= 0x303840FF,
+	.textbox_border		= 0x34BEEDFF,
+	.text			= 0x404040FF,
+	.caret			= 0xFF3232FF,
+	.title			= 0xBEBEBEFF,
 	.hint			= 0x707A86FF,
 };
 
@@ -110,6 +105,11 @@ size_t OSK_UTF8Decode(const char *str, uint32_t *cp)
 /*-------------------------------------------------------------
   helpers
 -------------------------------------------------------------*/
+static bool multiline(const osk_keyboard *osk)
+{
+	return (osk->cfg.flags & OSK_FLAG_MULTILINE) != 0;
+}
+
 static void emit(osk_keyboard *osk, osk_event ev)
 {
 	if (osk->cfg.on_event)
@@ -118,30 +118,37 @@ static void emit(osk_keyboard *osk, osk_event ev)
 
 static void reject(osk_keyboard *osk)
 {
-	osk->reject_time = 12;
 	emit(osk, OSK_EVENT_REJECT);
 }
 
 bool osk_accepts(const osk_keyboard *osk, uint32_t cp)
 {
-	if (!cp || !OSK_CanDisplay(cp))
+	if (!cp)
 		return false;
+	if (cp == '\n') {
+		if (!multiline(osk))
+			return false;
+	} else if (!OSK_CanDisplay(cp)) {
+		return false;
+	}
 	if (osk->cfg.filter && !osk->cfg.filter(cp, osk->cfg.user))
 		return false;
 	return true;
 }
 
+/* keep the caret's line inside the two visible lines */
 static void ensure_caret_visible(osk_keyboard *osk)
 {
-	unsigned visible = osk_textbox_visible_chars(osk);
+	unsigned start[OSK_MAX_CHARS + 2];
+	unsigned n = osk_wrap_text(osk, start);
+	unsigned line = osk_line_of(start, n, osk->caret);
 
-	if (osk->caret < osk->scroll)
-		osk->scroll = osk->caret;
-	if (osk->caret >= osk->scroll + visible)
-		osk->scroll = osk->caret - visible + 1;
-	/* pull back when text got shorter */
-	if (osk->len + 1 < osk->scroll + visible)
-		osk->scroll = osk->len + 1 > visible ? osk->len + 1 - visible : 0;
+	if (line < osk->scroll)
+		osk->scroll = line;
+	if (line >= osk->scroll + OSK_TEXT_LINES)
+		osk->scroll = line - OSK_TEXT_LINES + 1;
+	if (osk->scroll + OSK_TEXT_LINES > n)
+		osk->scroll = n > OSK_TEXT_LINES ? n - OSK_TEXT_LINES : 0;
 }
 
 static bool insert_char(osk_keyboard *osk, uint32_t cp)
@@ -203,6 +210,43 @@ static void cancel(osk_keyboard *osk)
 	emit(osk, OSK_EVENT_CANCEL);
 }
 
+/* Enter key, USB Return and typed '\n' */
+static void enter(osk_keyboard *osk)
+{
+	if (multiline(osk))
+		insert_char(osk, '\n');
+	else
+		confirm(osk);
+}
+
+/* move the caret one line up or down, keeping its x position */
+static void caret_line(osk_keyboard *osk, int dir)
+{
+	unsigned start[OSK_MAX_CHARS + 2];
+	unsigned n = osk_wrap_text(osk, start);
+	unsigned line = osk_line_of(start, n, osk->caret), i, end, best;
+	float x = osk_caret_x(osk, start, line, osk->caret), bx = 1e9f;
+
+	if ((dir < 0 && line == 0) || (dir > 0 && line + 1 >= n)) {
+		reject(osk);
+		return;
+	}
+	line += dir;
+	end = start[line + 1];
+	/* a line ended by '\n' or a wrap cannot hold the caret at its very end */
+	if (line + 1 < n)
+		end--;
+	best = start[line];
+	for (i = start[line]; i <= end; i++) {
+		float d = fabsf(osk_caret_x(osk, start, line, i) - x);
+		if (d < bx) {
+			bx = d;
+			best = i;
+		}
+	}
+	osk->caret = best;
+}
+
 static void set_focus(osk_keyboard *osk, int key)
 {
 	if (key == osk->focus)
@@ -216,56 +260,67 @@ static int key_at(const osk_keyboard *osk, float x, float y)
 {
 	int i;
 
-	for (i = 0; i < osk->keys.nkeys; i++) {
-		const osk_key *k = &osk->keys.keys[i];
-		if (x >= k->x && x < k->x + k->w && y >= k->y && y < k->y + k->h)
+	for (i = 0; i < osk->nkeys; i++) {
+		const osk_key *k = &osk->keys[i];
+		if (x >= k->hx && x < k->hx + k->hw && y >= k->hy && y < k->hy + k->hh)
 			return i;
 	}
 	return -1;
 }
 
+static int find_kind(const osk_keyboard *osk, key_kind kind)
+{
+	int i;
+
+	for (i = 0; i < osk->nkeys; i++)
+		if (osk->keys[i].kind == kind)
+			return i;
+	return -1;
+}
+
+/* 'q' (first key of the second row) on letter pages, '1' on the numpad */
 static int default_key(const osk_keyboard *osk)
 {
 	int i;
 
-	/* first character key of the second row, else the first key */
-	for (i = 0; i < osk->keys.nkeys; i++)
-		if (osk->keys.keys[i].y > osk->keys.keys[0].y)
-			return i;
+	if (!osk->numpad)
+		for (i = 0; i < osk->nkeys; i++)
+			if (osk->keys[i].kind == KEY_CHAR && osk->keys[i].cy > osk->keys[0].cy)
+				return i;
 	return 0;
 }
+
+#define SAME_ROW	12.0f
 
 static void move_focus(osk_keyboard *osk, int dx, int dy)
 {
 	const osk_key *cur, *k;
-	float cx, cy, kx, ky, best = 1e9f, score;
+	float cx, cy, best = 1e9f, score;
 	int i, found = -1;
 
 	if (osk->focus < 0) {
 		set_focus(osk, default_key(osk));
 		return;
 	}
-	cur = &osk->keys.keys[osk->focus];
-	cx = cur->x + cur->w / 2;
-	cy = cur->y + cur->h / 2;
+	cur = &osk->keys[osk->focus];
+	cx = cur->cx;
+	cy = cur->cy;
 
-	for (i = 0; i < osk->keys.nkeys; i++) {
+	for (i = 0; i < osk->nkeys; i++) {
 		if (i == osk->focus)
 			continue;
-		k = &osk->keys.keys[i];
-		kx = k->x + k->w / 2;
-		ky = k->y + k->h / 2;
+		k = &osk->keys[i];
 		if (dx) {
-			if (fabsf(ky - cy) > 1.0f || (kx - cx) * dx <= 0)
+			if (fabsf(k->cy - cy) > SAME_ROW || (k->cx - cx) * dx <= 0)
 				continue;
-			score = fabsf(kx - cx);
+			score = fabsf(k->cx - cx);
 		} else {
-			if ((ky - cy) * dy <= 1.0f)
+			if ((k->cy - cy) * dy <= SAME_ROW)
 				continue;
 			/* nearest row first, then the key closest to the current column */
-			score = fabsf(ky - cy) * 1000.0f;
-			if (cx < k->x || cx >= k->x + k->w)
-				score += fabsf(kx - cx);
+			score = roundf(fabsf(k->cy - cy) / SAME_ROW) * 1000.0f;
+			if (cx < k->hx || cx >= k->hx + k->hw)
+				score += fabsf(k->cx - cx);
 		}
 		if (score < best) {
 			best = score;
@@ -275,13 +330,11 @@ static void move_focus(osk_keyboard *osk, int dx, int dy)
 
 	if (found < 0 && dx) {
 		/* wrap within the row */
-		for (i = 0; i < osk->keys.nkeys; i++) {
-			k = &osk->keys.keys[i];
-			kx = k->x + k->w / 2;
-			ky = k->y + k->h / 2;
-			if (fabsf(ky - cy) > 1.0f)
+		for (i = 0; i < osk->nkeys; i++) {
+			k = &osk->keys[i];
+			if (fabsf(k->cy - cy) > SAME_ROW)
 				continue;
-			score = kx * dx;	/* LEFT wraps to the rightmost key and vice versa */
+			score = k->cx * dx;	/* LEFT wraps to the rightmost key and vice versa */
 			if (found < 0 || score < best) {
 				best = score;
 				found = i;
@@ -292,15 +345,30 @@ static void move_focus(osk_keyboard *osk, int dx, int dy)
 		set_focus(osk, found);
 }
 
+static void switch_page(osk_keyboard *osk, bool numpad)
+{
+	key_kind tab = numpad ? KEY_TAB_NUMPAD : KEY_TAB_LETTERS;
+	int i;
+
+	if (osk->numpad == numpad)
+		return;
+	osk->numpad = numpad;
+	osk->shift = osk->caps = osk->alt = false;
+	osk_build_keys(osk);
+	i = find_kind(osk, tab);
+	osk->focus = i >= 0 ? i : default_key(osk);
+	if (i >= 0)
+		osk->keys[i].focus = 1;
+}
+
 static void press_key(osk_keyboard *osk, int idx, bool repeat)
 {
-	const osk_key *k = &osk->keys.keys[idx];
+	osk_key *k = &osk->keys[idx];
 
-	if (repeat && k->kind != KEY_BACK && k->kind != KEY_LEFT && k->kind != KEY_RIGHT)
+	if (repeat && k->kind != KEY_BACK)
 		return;
 
-	osk->flash_key = idx;
-	osk->flash_time = 8;
+	k->push = 0;
 	emit(osk, OSK_EVENT_PRESS);
 
 	switch (k->kind) {
@@ -314,6 +382,9 @@ static void press_key(osk_keyboard *osk, int idx, bool repeat)
 	case KEY_BACK:
 		backspace(osk);
 		break;
+	case KEY_ENTER:
+		enter(osk);
+		break;
 	case KEY_SHIFT:
 		osk->shift = !osk->shift;
 		break;
@@ -323,38 +394,79 @@ static void press_key(osk_keyboard *osk, int idx, bool repeat)
 	case KEY_ALT:
 		osk->alt = !osk->alt;
 		break;
-	case KEY_LEFT:
-		if (osk->caret)
-			osk->caret--;
-		break;
-	case KEY_RIGHT:
-		if (osk->caret < osk->len)
-			osk->caret++;
-		break;
 	case KEY_OK:
 		confirm(osk);
 		break;
 	case KEY_CANCEL:
 		cancel(osk);
 		break;
+	case KEY_TAB_LETTERS:
+		switch_page(osk, false);
+		break;
+	case KEY_TAB_NUMPAD:
+		switch_page(osk, true);
+		break;
 	}
 }
 
-static bool pointer_in_textbox(const osk_keyboard *osk, unsigned *index)
+static bool pointer_in(const osk_keyboard *osk, float x, float y, float w, float h)
 {
-	float x, y, w, h;
-	int col;
+	return osk->px >= x && osk->px < x + w && osk->py >= y && osk->py < y + h;
+}
 
-	osk_textbox_rect(osk, &x, &y, &w, &h);
-	if (osk->px < x || osk->px >= x + w || osk->py < y || osk->py >= y + h)
+/* text box: click places the caret, the arrows move it by a line */
+static bool pointer_textbox(osk_keyboard *osk)
+{
+	unsigned start[OSK_MAX_CHARS + 2], n, line, i, end, best;
+	float x, bx = 1e9f;
+
+	if (!pointer_in(osk, 39, 30.33f, 556, 100))
 		return false;
-	col = (int)((osk->px - x - 12.0f) / (OSK_GLYPH_W * OSK_TEXT_SCALE) + 0.5f);
-	if (col < 0)
-		col = 0;
-	*index = osk->scroll + col;
-	if (*index > osk->len)
-		*index = osk->len;
+
+	n = osk_wrap_text(osk, start);
+	if (n > OSK_TEXT_LINES && pointer_in(osk, 546, 46, 38, 30)) {
+		caret_line(osk, -1);
+		return true;
+	}
+	if (n > OSK_TEXT_LINES && pointer_in(osk, 546, 85, 38, 30)) {
+		caret_line(osk, 1);
+		return true;
+	}
+
+	line = osk->py < OSK_TEXT_Y + OSK_TEXT_LINE_H ? 0 : 1;
+	line += osk->scroll;
+	if (line >= n)
+		line = n - 1;
+	end = start[line + 1];
+	if (line + 1 < n)
+		end--;
+	x = osk->px - OSK_TEXT_X;
+	best = start[line];
+	for (i = start[line]; i <= end; i++) {
+		float d = fabsf(osk_caret_x(osk, start, line, i) - x);
+		if (d < bx) {
+			bx = d;
+			best = i;
+		}
+	}
+	osk->caret = best;
 	return true;
+}
+
+static void animate(osk_keyboard *osk)
+{
+	int i;
+
+	for (i = 0; i < osk->nkeys; i++) {
+		osk_key *k = &osk->keys[i];
+
+		if (i == osk->focus)
+			k->focus = fminf(k->focus + 1.0f / OSK_FOCUS_IN_FRAMES, 1);
+		else
+			k->focus = fmaxf(k->focus - 1.0f / OSK_FOCUS_OUT_FRAMES, 0);
+		if (k->push >= 0 && ++k->push > OSK_PUSH_FRAMES)
+			k->push = -1;
+	}
 }
 
 /*-------------------------------------------------------------
@@ -369,7 +481,7 @@ osk_keyboard *OSK_Create(const osk_config *cfg)
 		OSK_DefaultConfig(&defaults);
 		cfg = &defaults;
 	}
-	if (!osk_font_init())
+	if (!osk_backend_init())
 		return NULL;
 
 	osk = calloc(1, sizeof(*osk));
@@ -391,10 +503,11 @@ osk_keyboard *OSK_Create(const osk_config *cfg)
 	osk->ox = (osk->vw - OSK_DESIGN_W) / 2;
 	osk->oy = 0;
 
-	osk->focus = -1;
-	osk->flash_key = -1;
+	osk->numpad = cfg->layout == OSK_LAYOUT_NUMPAD;
+	osk->letters = osk->numpad ? OSK_LAYOUT_QWERTY : cfg->layout;
 	osk_build_keys(osk);
 	osk->focus = default_key(osk);
+	osk->keys[osk->focus].focus = 1;
 
 	OSK_SetText(osk, cfg->initial);
 	return osk;
@@ -413,11 +526,13 @@ void OSK_SetText(osk_keyboard *osk, const char *utf8)
 	osk->len = 0;
 	while (utf8 && (n = OSK_UTF8Decode(utf8, &cp)) != 0) {
 		utf8 += n;
-		if (cp == 0xA0)
+		if (cp == '\r')
+			continue;
+		if (cp == 0xA0 || (cp == '\n' && !multiline(osk)))
 			cp = ' ';
 		if (osk->len >= osk->max_chars)
 			break;
-		if (!OSK_CanDisplay(cp))
+		if (cp != '\n' && !OSK_CanDisplay(cp))
 			cp = '?';
 		osk->text[osk->len++] = cp;
 	}
@@ -482,7 +597,7 @@ void OSK_Resume(osk_keyboard *osk)
 osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 {
 	u32 fire = 0, repeated = 0;
-	unsigned i, idx;
+	unsigned i;
 	osk_input none;
 
 	if (osk->status != OSK_STATUS_EDITING)
@@ -493,10 +608,6 @@ osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 	}
 
 	osk->frame++;
-	if (osk->flash_time > 0)
-		osk->flash_time--;
-	if (osk->reject_time > 0)
-		osk->reject_time--;
 
 	/* pointer */
 	if (in->pointer_valid) {
@@ -508,9 +619,7 @@ osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 		osk->px = px;
 		osk->py = py;
 		if (moved) {
-			int hit = key_at(osk, px, py);
-			if (hit != osk->focus)
-				set_focus(osk, hit);
+			set_focus(osk, key_at(osk, px, py));
 			osk->last_px = px;
 			osk->last_py = py;
 		}
@@ -536,14 +645,19 @@ osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 		}
 	}
 
-	for (i = 0; i < in->text_count && i < OSK_INPUT_MAX_TEXT; i++)
-		insert_char(osk, in->text[i]);
+	for (i = 0; i < in->text_count && i < OSK_INPUT_MAX_TEXT && osk->status == OSK_STATUS_EDITING; i++) {
+		if (in->text[i] == '\n' || in->text[i] == '\r')
+			enter(osk);
+		else
+			insert_char(osk, in->text[i]);
+	}
 
 	if (fire & OSK_BTN_SELECT) {
-		if (!(repeated & OSK_BTN_SELECT) && in->pointer_valid && pointer_in_textbox(osk, &idx))
-			osk->caret = idx;
+		bool rep = (repeated & OSK_BTN_SELECT) != 0;
+		if (!rep && in->pointer_valid && osk->focus < 0 && pointer_textbox(osk))
+			;
 		else if (osk->focus >= 0)
-			press_key(osk, osk->focus, (repeated & OSK_BTN_SELECT) != 0);
+			press_key(osk, osk->focus, rep);
 	}
 	if (fire & OSK_BTN_BACKSPACE)	backspace(osk);
 	if (fire & OSK_BTN_DELETE)	delete_char(osk);
@@ -554,7 +668,7 @@ osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 	if (fire & OSK_BTN_CARET_HOME)	osk->caret = 0;
 	if (fire & OSK_BTN_CARET_END)	osk->caret = osk->len;
 	if (fire & OSK_BTN_SHIFT)	osk->shift = !osk->shift;
-	if ((fire & OSK_BTN_ALT) && osk->keys.has_alt)
+	if ((fire & OSK_BTN_ALT) && !osk->numpad)
 		osk->alt = !osk->alt;
 	if (fire & OSK_BTN_SPACE)	insert_char(osk, ' ');
 	if (fire & OSK_BTN_UP)		move_focus(osk, 0, -1);
@@ -569,97 +683,7 @@ osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 			cancel(osk);
 	}
 
+	animate(osk);
 	ensure_caret_visible(osk);
 	return osk->status;
-}
-
-/*-------------------------------------------------------------
-  controller input
--------------------------------------------------------------*/
-static const struct { u32 from, to; } wpad_map[] = {
-	{ WPAD_BUTTON_A,		OSK_BTN_SELECT },
-	{ WPAD_BUTTON_B,		OSK_BTN_BACKSPACE },
-	{ WPAD_BUTTON_UP,		OSK_BTN_UP },
-	{ WPAD_BUTTON_DOWN,		OSK_BTN_DOWN },
-	{ WPAD_BUTTON_LEFT,		OSK_BTN_LEFT },
-	{ WPAD_BUTTON_RIGHT,		OSK_BTN_RIGHT },
-	{ WPAD_BUTTON_PLUS,		OSK_BTN_CONFIRM },
-	{ WPAD_BUTTON_MINUS,		OSK_BTN_SHIFT },
-	{ WPAD_BUTTON_1,		OSK_BTN_CARET_LEFT },
-	{ WPAD_BUTTON_2,		OSK_BTN_CARET_RIGHT },
-	{ WPAD_BUTTON_HOME,		OSK_BTN_CANCEL },
-	{ WPAD_CLASSIC_BUTTON_A,	OSK_BTN_SELECT },
-	{ WPAD_CLASSIC_BUTTON_B,	OSK_BTN_BACKSPACE },
-	{ WPAD_CLASSIC_BUTTON_UP,	OSK_BTN_UP },
-	{ WPAD_CLASSIC_BUTTON_DOWN,	OSK_BTN_DOWN },
-	{ WPAD_CLASSIC_BUTTON_LEFT,	OSK_BTN_LEFT },
-	{ WPAD_CLASSIC_BUTTON_RIGHT,	OSK_BTN_RIGHT },
-	{ WPAD_CLASSIC_BUTTON_PLUS,	OSK_BTN_CONFIRM },
-	{ WPAD_CLASSIC_BUTTON_MINUS,	OSK_BTN_SHIFT },
-	{ WPAD_CLASSIC_BUTTON_FULL_L,	OSK_BTN_CARET_LEFT },
-	{ WPAD_CLASSIC_BUTTON_FULL_R,	OSK_BTN_CARET_RIGHT },
-	{ WPAD_CLASSIC_BUTTON_X,	OSK_BTN_SPACE },
-	{ WPAD_CLASSIC_BUTTON_Y,	OSK_BTN_ALT },
-	{ WPAD_CLASSIC_BUTTON_HOME,	OSK_BTN_CANCEL },
-};
-
-static const struct { u32 from, to; } pad_map[] = {
-	{ PAD_BUTTON_A,		OSK_BTN_SELECT },
-	{ PAD_BUTTON_B,		OSK_BTN_BACKSPACE },
-	{ PAD_BUTTON_UP,	OSK_BTN_UP },
-	{ PAD_BUTTON_DOWN,	OSK_BTN_DOWN },
-	{ PAD_BUTTON_LEFT,	OSK_BTN_LEFT },
-	{ PAD_BUTTON_RIGHT,	OSK_BTN_RIGHT },
-	{ PAD_BUTTON_START,	OSK_BTN_CONFIRM },
-	{ PAD_BUTTON_Y,		OSK_BTN_SHIFT },
-	{ PAD_BUTTON_X,		OSK_BTN_SPACE },
-	{ PAD_TRIGGER_Z,	OSK_BTN_ALT },
-	{ PAD_TRIGGER_L,	OSK_BTN_CARET_LEFT },
-	{ PAD_TRIGGER_R,	OSK_BTN_CARET_RIGHT },
-};
-
-#define MAP_BUTTONS(table, bits) ({ \
-	u32 _r = 0; unsigned _i; \
-	for (_i = 0; _i < sizeof(table) / sizeof(table[0]); _i++) \
-		if ((bits) & table[_i].from) _r |= table[_i].to; \
-	_r; })
-
-#define STICK_THRESHOLD	48
-
-static u32 stick_prev[4];
-
-void OSK_ReadInput(osk_input *in, int wpad_chan, int pad_chan)
-{
-	memset(in, 0, sizeof(*in));
-
-	if (wpad_chan >= 0) {
-		WPADData *wd = WPAD_Data(wpad_chan);
-
-		in->down |= MAP_BUTTONS(wpad_map, WPAD_ButtonsDown(wpad_chan));
-		in->held |= MAP_BUTTONS(wpad_map, WPAD_ButtonsHeld(wpad_chan));
-		if (wd && wd->ir.valid) {
-			in->pointer_valid = true;
-			in->pointer_x = wd->ir.x;
-			in->pointer_y = wd->ir.y;
-		}
-	}
-
-	if (pad_chan >= 0 && pad_chan < 4) {
-		s8 sx = PAD_StickX(pad_chan), sy = PAD_StickY(pad_chan);
-		u32 stick = 0;
-
-		in->down |= MAP_BUTTONS(pad_map, PAD_ButtonsDown(pad_chan));
-		in->held |= MAP_BUTTONS(pad_map, PAD_ButtonsHeld(pad_chan));
-
-		if (sx < -STICK_THRESHOLD) stick |= OSK_BTN_LEFT;
-		if (sx > STICK_THRESHOLD)  stick |= OSK_BTN_RIGHT;
-		if (sy > STICK_THRESHOLD)  stick |= OSK_BTN_UP;
-		if (sy < -STICK_THRESHOLD) stick |= OSK_BTN_DOWN;
-		in->held |= stick;
-		in->down |= stick & ~stick_prev[pad_chan];
-		stick_prev[pad_chan] = stick;
-	}
-
-	if (osk_usb_poll)
-		osk_usb_poll(in);
 }
