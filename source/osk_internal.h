@@ -160,6 +160,10 @@ bool osk_predict_active(const osk_keyboard *osk);
 bool osk_predict_update(osk_keyboard *osk, bool force);
 bool osk_is_word_char(uint32_t cp);
 
+/* osk_syslang.c: CONF_GetLanguage(), CONF_GetArea() (negative if
+   unknown) and CONF_GetRegion() -> dictionary language */
+osk_language osk_conf_language(int lang, int area, int region);
+
 /* osk_layouts.c */
 void osk_build_keys(osk_keyboard *osk);
 /* re-add the candidate bar's keys after the base keys */

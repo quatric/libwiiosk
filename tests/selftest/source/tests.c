@@ -164,6 +164,43 @@ static void sound_tests(void)
 	check(ok && total > 4000 && !OSK_GetSound(OSK_SOUND_COUNT, &d), "sound data");
 }
 
+/* internal (osk_syslang.c): CONF language, area, region -> language */
+osk_language osk_conf_language(int lang, int area, int region);
+
+static void language_tests(void)
+{
+	static const struct { int lang, area, region; osk_language want; } cases[] = {
+		{ 1, 1, 1, OSK_LANG_EN_US },	/* English, USA */
+		{ 1, 2, 2, OSK_LANG_EN_GB },	/* English, Europe */
+		{ 1, 3, 2, OSK_LANG_EN_GB },	/* English, Australia */
+		{ 2, 2, 2, OSK_LANG_DE },
+		{ 3, 1, 1, OSK_LANG_FR_CA },	/* French, USA */
+		{ 3, 2, 2, OSK_LANG_FR },
+		{ 4, 10, 1, OSK_LANG_ES_LA },	/* Spanish, Latin America */
+		{ 4, 4, 1, OSK_LANG_ES_LA },	/* Spanish, Brazil */
+		{ 4, 2, 2, OSK_LANG_ES },
+		{ 5, 2, 2, OSK_LANG_IT },
+		{ 6, 2, 2, OSK_LANG_NL },
+		{ 1, -1, 1, OSK_LANG_EN_US },	/* no area: the region decides */
+		{ 1, -1, 2, OSK_LANG_EN_GB },
+		{ 0, 0, 0, OSK_LANG_NONE },	/* Japanese */
+		{ 9, 7, 4, OSK_LANG_NONE },	/* Korean */
+	};
+	unsigned i;
+	bool ok = true;
+
+	for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+		if (osk_conf_language(cases[i].lang, cases[i].area, cases[i].region) != cases[i].want)
+			ok = false;
+	check(ok, "system language");
+	check(OSK_LanguageDictionary(OSK_LANG_EN_GB) == &osk_dict_en_gb &&
+	      OSK_LanguageDictionary(OSK_LANG_NL) == &osk_dict_nl &&
+	      !OSK_LanguageDictionary(OSK_LANG_NONE), "language dictionary");
+#ifdef GEKKO
+	check(OSK_SystemDictionary() == OSK_LanguageDictionary(OSK_SystemLanguage()), "system dictionary");
+#endif
+}
+
 static void prediction_tests(void)
 {
 	static u8 junk[4096], cut[5000];
@@ -463,5 +500,6 @@ void run_tests(void)
 	      !OSK_CanDisplay(0x3042) && !OSK_CanDisplay('\n'), "font coverage");
 
 	prediction_tests();
+	language_tests();
 	sound_tests();
 }

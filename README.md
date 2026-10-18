@@ -121,6 +121,27 @@ through up to 20 suggestions. Prediction never appears in password mode or on th
 | `osk_dict_it`      | Italian                 | 110 KB |
 | `osk_dict_nl`      | Dutch                   | 106 KB |
 
+To follow the console's language like the system keyboard does:
+
+```c
+cfg.dictionary = OSK_SystemDictionary();   /* NULL for Japanese, Chinese, Korean */
+```
+
+The console language selects the dictionary. The USA, Brazil and Latin America areas get the
+American variants (`en_us`, `fr_ca`, `es_la`) and every other area the European ones. This links
+all nine dictionaries (about 950 KB). To ship only some, switch on `OSK_SystemLanguage()`, which
+links no dictionary data:
+
+```c
+switch (OSK_SystemLanguage()) {
+case OSK_LANG_DE: cfg.dictionary = &osk_dict_de; break;
+case OSK_LANG_FR: cfg.dictionary = &osk_dict_fr; break;
+default:          cfg.dictionary = &osk_dict_en_us; break;
+}
+```
+
+`OSK_LanguageDictionary()` maps any `osk_language` to its dictionary.
+
 Each dictionary is a separate object in `libwiiosk.a`, so only the ones you reference are linked.
 To use dictionary files instead, for example from SD, load an eZiText `.zsd` (and optionally a
 `.znd` of extra words) into memory and wrap them:
@@ -245,7 +266,7 @@ Latin-1, `Œ œ` and `€`. It does not include CJK.
 editing, max length, UTF-8, navigation and wrap, Shift and Caps, the More page, auto-repeat, 4:3 and
 16:9 pointer mapping, the caret pointer, Enter and line breaks, the toolbar buttons and tabs, the
 German and French tables, filters and flags, the sound triggers and decoder, and word prediction (ranking, capitalisation, accents,
-the bar, scrolling, the length limit and damaged dictionaries). On the Wii the verdict appears in the text box
+the bar, scrolling, the length limit, damaged dictionaries and the console language mapping). On the Wii the verdict appears in the text box
 (`SELFTEST PASS n/n`), then it cycles through every layout for a visual check. It runs in Dolphin.
 
 The same cases also build for the desktop, together with a preview tool that draws the keyboard

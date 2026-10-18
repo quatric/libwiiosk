@@ -72,6 +72,20 @@ extern const osk_dictionary osk_dict_es_la;	/* Spanish (Latin America) */
 extern const osk_dictionary osk_dict_it;	/* Italian */
 extern const osk_dictionary osk_dict_nl;	/* Dutch */
 
+/* Dictionary languages. */
+typedef enum {
+	OSK_LANG_NONE = 0,	/* no dictionary (e.g. Japanese, Chinese, Korean) */
+	OSK_LANG_EN_US,
+	OSK_LANG_EN_GB,
+	OSK_LANG_DE,
+	OSK_LANG_FR,
+	OSK_LANG_FR_CA,
+	OSK_LANG_ES,
+	OSK_LANG_ES_LA,
+	OSK_LANG_IT,
+	OSK_LANG_NL
+} osk_language;
+
 typedef enum {
 	OSK_STATUS_EDITING = 0,
 	OSK_STATUS_DONE,	/* OK pressed, text accepted */
@@ -266,6 +280,17 @@ typedef struct {
 	unsigned jitter_cents;
 } osk_sound_data;
 bool OSK_GetSound(osk_sound sound, osk_sound_data *out);
+
+/* The dictionary language matching the console settings, like the
+   system keyboard: the language, with the American variants (en_us,
+   fr_ca, es_la) in the USA, Brazil and Latin America areas and the
+   European ones elsewhere. Links no dictionary data. */
+osk_language OSK_SystemLanguage(void);
+/* The built-in dictionary for a language, NULL for OSK_LANG_NONE.
+   Using either of these links all nine dictionaries (about 950 KB);
+   to keep a few, switch on OSK_SystemLanguage() yourself. */
+const osk_dictionary *OSK_LanguageDictionary(osk_language lang);
+const osk_dictionary *OSK_SystemDictionary(void);	/* of OSK_SystemLanguage() */
 
 /* Fill d from .zsd / .znd files loaded by the app (e.g. from SD); the
    buffers must stay valid while a keyboard uses them. znd may be NULL.
