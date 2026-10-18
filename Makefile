@@ -46,7 +46,7 @@ $(BUILD) $(LIBDIR):
 
 install: all
 	@mkdir -p $(INSTALL_DIR)/include $(INSTALL_DIR)/lib
-	cp $(INCLUDES)/wiiosk.h $(INSTALL_DIR)/include/
+	cp $(INCLUDES)/wiiosk.h $(INCLUDES)/wiiosk_input_wii.h $(INSTALL_DIR)/include/
 	cp $(LIBDIR)/$(TARGET) $(INSTALL_DIR)/lib/
 
 example: all

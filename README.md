@@ -160,6 +160,33 @@ link it. `tools/mksound.py` renders the sounds from the keyboard's sound archive
 instruments with their envelopes, and stores each sound at the lowest rate that keeps its sound,
 as 4-bit IMA ADPCM.
 
+## libinput-wii
+
+Apps that read their controllers with [libinput-wii](https://github.com/quatric/libinput-wii) can
+feed the keyboard from it instead of `OSK_ReadInput()`:
+
+```c
+#include <input_wii.h>
+#include <wiiosk_input_wii.h>
+
+INPUT_Init();
+INPUT_SetScreenSize(cfg.screen_width, cfg.screen_height);
+...
+INPUT_Update();
+OSK_ReadInputWii(&in);
+OSK_Update(osk, &in);
+```
+
+`wiiosk_input_wii.h` is header-only, and libwiiosk.a does not contain or link libinput-wii, which is
+AGPL-3.0 licensed. The adapter reads the controllers (every pad libinput-wii supports, folded onto
+Wii Remote buttons, plus the Nunchuk's Z for More and C for Space). The pointer comes from
+libinput-wii's cursor, so the Wii Remote and a USB mouse both work, and the left mouse button
+presses keys. Keys come from its keyboard queue, and held Backspace, Delete and arrow keys repeat.
+Do not also call `OSK_InitUSBKeyboard()`: libinput-wii already owns the keyboard. libinput-wii maps
+GameCube Start to HOME, so on a GameCube pad Start cancels. `example/input_wii` shows the whole
+loop; build it with `make -C example/input_wii LIBINPUT_WII=/path/to/libinput-wii` (it also needs
+`-lwiikeyboard`).
+
 ## Controls
 
 | Action        | Wii Remote | Classic | GameCube      | USB keyboard  |
@@ -233,17 +260,19 @@ tools/preview/wiiosk_preview out_dir 2     # one PNG per scene, at 2x
 ## Layout of this folder
 
 ```
-include/wiiosk.h        public API
-source/                 library sources
-example/gx              GX integration example
-example/console         OSK_Prompt() example
-tests/selftest          scripted self-test
-source/dict/            generated dictionaries, one object per language
-tools/mkfont.py         generates source/osk_font_data.c from the font
-tools/mkdict.py         generates source/dict/ from eZiText dictionaries
-tools/mksound.py        generates source/osk_sound_data.c from the keyboard's sound archive
-tools/preview           desktop build: previews and self-test
-nintendo_sdk_original/  original SDK package (local reference only, git-ignored)
+include/wiiosk.h            public API
+include/wiiosk_input_wii.h  libinput-wii adapter (header only)
+source/                     library sources
+source/dict/                generated dictionaries, one object per language
+example/gx                  GX integration example
+example/console             OSK_Prompt() example
+example/input_wii           input through libinput-wii
+tests/selftest              scripted self-test
+tools/mkfont.py             generates source/osk_font_data.c from the font
+tools/mkdict.py             generates source/dict/ from eZiText dictionaries
+tools/mksound.py            generates source/osk_sound_data.c from the keyboard's sound archive
+tools/preview               desktop build: previews and self-test
+nintendo_sdk_original/      original SDK package (local reference only, git-ignored)
 ```
 
 ## Provenance
