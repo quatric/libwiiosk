@@ -1,4 +1,4 @@
-# wiiosk
+# libwiiosk
 
 On-screen software keyboard library for Wii homebrew, built on libogc / GX.
 
