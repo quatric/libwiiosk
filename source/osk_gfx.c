@@ -393,6 +393,93 @@ static void gen_arrow(osk_image *im)
 	}
 }
 
+/* prediction on: an open book, two curved pages with ruled lines on a
+   dark cover */
+static void gen_book_open(osk_image *im)
+{
+	static const float cover[] = {
+		0, 5, 8, 3, 16, 3.5f, 22, 6, 28, 3.5f, 36, 3, 44, 5, 44, 26, 30, 25, 22, 28, 14, 25, 0, 26,
+	};
+	static const float left[] = {
+		2.5f, 2, 9, 0.5f, 16, 1, 21, 4, 21, 24.5f, 15, 22, 8, 21.5f, 2.5f, 23,
+	};
+	static const float right[] = {
+		41.5f, 2, 35, 0.5f, 28, 1, 23, 4, 23, 24.5f, 29, 22, 36, 21.5f, 41.5f, 23,
+	};
+	int x, y;
+
+	for (y = 0; y < im->h; y++) {
+		for (x = 0; x < im->w; x++) {
+			float a = poly(cover, 12, x, y);
+			float page = fmaxf(poly(left, 8, x, y), poly(right, 8, x, y));
+			float v = DARK;
+
+			if (page > 0) {
+				/* ruled lines, slightly curved like the pages */
+				float c = fabsf(x + 0.5f - 22) / 20.0f;
+				float ly = y + 0.5f + c * c * 2.5f;
+				bool line = (x >= 5 && x <= 18) || (x >= 26 && x <= 39);
+				float r = line && ly > 7 && ly < 21 && fmodf(ly - 7, 4.0f) < 1.0f ? 160 : 255;
+				v = mixf(DARK, r, page);
+			}
+			put(im, x, y, v, v, v, fmaxf(a, page));
+		}
+	}
+}
+
+/* prediction off: a closed book with a label */
+static void gen_book_closed(osk_image *im)
+{
+	int x, y;
+
+	for (y = 0; y < im->h; y++) {
+		for (x = 0; x < im->w; x++) {
+			float px = x + 0.5f, py = y + 0.5f;
+			float a = fmaxf(rrect(px, py, 2, 0, 30, 25, 3), rrect(px, py, 2, 20, 31, 28, 2));
+			float cover = rrect(px, py, 4, 2, 28, 22, 2);
+			float pages = rrect(px, py, 5, 23, 29, 26, 1) * (1 - rrect(px, py, 2, 0, 30, 24, 3));
+			float label = rrect(px, py, 7, 4, 25, 9, 0.5f);
+			float v = mixf(DARK, 230, cover);
+
+			v = mixf(v, 170, label);
+			v = mixf(v, 255, pages);
+			put(im, x, y, v, v, v, a);
+		}
+	}
+}
+
+/* candidate bar arrow: white rounded square, dark rim, dark triangle
+   pointing left */
+static void gen_scroll(osk_image *im)
+{
+	static const float tri[] = {
+		10, 16, 23, 7.5f, 23, 24.5f,
+	};
+	int x, y;
+
+	for (y = 0; y < im->h; y++) {
+		for (x = 0; x < im->w; x++) {
+			float px = x + 0.5f, py = y + 0.5f;
+			float a = rrect(px, py, 1, 1, 35, 31, 6);
+			float in = rrect(px, py, 2.5f, 2.5f, 33.5f, 29.5f, 4.5f);
+			float v = mixf(DARK, 255, in);
+
+			v = mixf(v, DARK, poly(tri, 3, x, y));
+			put(im, x, y, v, v, v, a);
+		}
+	}
+}
+
+/* white rounded square, stretched as three slices for highlights */
+static void gen_round(osk_image *im)
+{
+	int x, y;
+
+	for (y = 0; y < im->h; y++)
+		for (x = 0; x < im->w; x++)
+			put_i(im, x, y, 255 * rrect(x + 0.5f, y + 0.5f, 0, 0, im->w, im->h, 10));
+}
+
 /*-------------------------------------------------------------
   text box frame corners: dark ring (tinted blue by the material)
   around white
@@ -478,6 +565,10 @@ static const struct {
 	[OSK_TEX_FRAME_THICK]	= {  16, 16, gen_frame_thick },
 	[OSK_TEX_FRAME_THIN]	= {   8,  8, gen_frame_thin },
 	[OSK_TEX_POINTER]	= {  32, 40, gen_pointer },
+	[OSK_TEX_BOOK_OPEN]	= {  44, 28, gen_book_open },
+	[OSK_TEX_BOOK_CLOSED]	= {  32, 28, gen_book_closed },
+	[OSK_TEX_SCROLL]	= {  36, 32, gen_scroll },
+	[OSK_TEX_ROUND]		= {  32, 32, gen_round },
 };
 
 bool osk_gfx_generate(osk_image images[OSK_TEX_IMAGES])

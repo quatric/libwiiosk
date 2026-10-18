@@ -61,6 +61,8 @@ static void shoot(osk_keyboard *osk, const char *name)
 	free(px);
 }
 
+static const osk_dictionary *dictionary;
+
 static osk_keyboard *make(osk_layout layout, unsigned flags, const char *title, const char *text)
 {
 	osk_config cfg;
@@ -71,6 +73,7 @@ static osk_keyboard *make(osk_layout layout, unsigned flags, const char *title, 
 	cfg.title = title;
 	cfg.initial = text;
 	cfg.max_chars = OSK_MAX_CHARS;
+	cfg.dictionary = dictionary;
 	if (flags & OSK_FLAG_WIDESCREEN)
 		cfg.screen_width = 854;
 	return OSK_Create(&cfg);
@@ -156,6 +159,29 @@ int main(int argc, char **argv)
 	osk = make(OSK_LAYOUT_QWERTY, OSK_FLAG_WIDESCREEN | OSK_FLAG_PASSWORD | OSK_FLAG_NO_CANCEL, NULL, "secret");
 	point(osk, 400, 300, 10);
 	shoot(osk, "wide");
+	OSK_Destroy(osk);
+
+	/* word prediction: candidates for "th", the second one focused */
+	dictionary = &osk_dict_en_us;
+	osk = make(OSK_LAYOUT_QWERTY, 0, NULL, "Hello th");
+	frames(osk, 1, OSK_BTN_UP);
+	frames(osk, 1, OSK_BTN_UP);
+	frames(osk, 1, OSK_BTN_RIGHT);
+	frames(osk, 10, 0);
+	shoot(osk, "us_predict");
+	OSK_Destroy(osk);
+
+	/* prediction switched off, pointer on the prediction key */
+	osk = make(OSK_LAYOUT_QWERTY, OSK_FLAG_PREDICT_OFF, NULL, "Hello th");
+	point(osk, 133, 370, 10);
+	shoot(osk, "us_predict_off");
+	OSK_Destroy(osk);
+
+	dictionary = &osk_dict_fr;
+	osk = make(OSK_LAYOUT_AZERTY, 0, NULL, "Il a \xC3\xA9t\xC3\xA9 fran");
+	unfocus(osk);
+	osk->frame = 11;
+	shoot(osk, "fr_predict");
 	OSK_Destroy(osk);
 	return 0;
 }

@@ -11,7 +11,7 @@ osk_internal.h -- private declarations shared by the wiiosk sources
 #define OSK_DESIGN_W		640
 #define OSK_DESIGN_H		480
 
-#define OSK_MAX_KEYS		72
+#define OSK_MAX_KEYS		96
 
 #define OSK_REPEAT_DELAY	24	/* frames before auto-repeat starts */
 #define OSK_REPEAT_RATE		4	/* frames between repeats */
@@ -32,7 +32,11 @@ typedef enum {
 	KEY_OK,
 	KEY_CANCEL,
 	KEY_TAB_LETTERS,	/* layout tabs in the toolbar */
-	KEY_TAB_NUMPAD
+	KEY_TAB_NUMPAD,
+	KEY_PREDICT,		/* toggles word prediction */
+	KEY_SCROLL_L,		/* candidate bar */
+	KEY_SCROLL_R,
+	KEY_CANDIDATE
 } key_kind;
 
 /* How a key is drawn. */
@@ -43,7 +47,9 @@ typedef enum {
 	LOOK_MORE,
 	LOOK_PILL,		/* Quit / OK */
 	LOOK_TAB,
-	LOOK_PAD		/* numpad key */
+	LOOK_PAD,		/* numpad key */
+	LOOK_SCROLL,		/* candidate bar arrows */
+	LOOK_CANDIDATE		/* a suggested word */
 } key_look;
 
 /* Code point index: [alt page][state], state = caps | shift << 1. */
@@ -53,11 +59,36 @@ typedef struct {
 	key_kind kind;
 	key_look look;
 	uint32_t cp[2][4];
+	unsigned cand;			/* KEY_CANDIDATE: index into the candidates */
 
 	/* animation */
 	float focus;			/* 0..1 */
 	int push;			/* frames since pressed, -1 = idle */
 } osk_key;
+
+/* osk_predict.c: a parsed dictionary and the current suggestions */
+#define OSK_MAX_CANDIDATES	20
+#define OSK_CAND_LEN		32	/* longest word, in code points */
+
+typedef struct {
+	bool ok;
+	const u8 *zsd;
+	u32 zsd_size;
+	u32 charset;			/* u16BE code points */
+	unsigned nchars;
+	u32 graph;			/* root node */
+	u32 block;			/* blocklist: length prefixed Latin-1 */
+	unsigned nblock;
+	const u8 *znd;
+	u32 znd_size;
+	unsigned nznd;
+	const char *name;
+} osk_predictor;
+
+typedef struct {
+	uint32_t cp[OSK_CAND_LEN];
+	u8 len;
+} osk_candidate;
 
 struct osk_keyboard {
 	osk_config cfg;
@@ -92,13 +123,35 @@ struct osk_keyboard {
 
 	/* auto repeat counters, one per OSK_BTN_* bit */
 	u16 repeat[16];
+
+	/* word prediction */
+	osk_predictor dict;
+	bool predict;			/* switched on by the prediction key */
+	int nbase;			/* keys before the candidate bar's keys */
+	unsigned word_start;		/* the word the candidates were made for */
+	uint32_t word[OSK_CAND_LEN];
+	unsigned word_len;
+	osk_candidate cand[OSK_MAX_CANDIDATES];
+	unsigned ncand;
+	unsigned cand_first, cand_shown;	/* visible candidates */
 };
 
 /* osk_core.c */
 bool osk_accepts(const osk_keyboard *osk, uint32_t cp);
 
+/* osk_predict.c */
+bool osk_dict_parse(osk_predictor *p, const osk_dictionary *d);
+/* true while the candidate bar is shown */
+bool osk_predict_active(const osk_keyboard *osk);
+/* recompute the candidates if the word before the caret changed; true
+   if they did */
+bool osk_predict_update(osk_keyboard *osk, bool force);
+bool osk_is_word_char(uint32_t cp);
+
 /* osk_layouts.c */
 void osk_build_keys(osk_keyboard *osk);
+/* re-add the candidate bar's keys after the base keys */
+void osk_build_bar(osk_keyboard *osk);
 uint32_t osk_key_char(const osk_keyboard *osk, const osk_key *k);
 const char *osk_key_label(const osk_keyboard *osk, const osk_key *k);
 bool osk_key_latched(const osk_keyboard *osk, const osk_key *k);
@@ -131,6 +184,14 @@ float osk_glyph_scale_y(const osk_font_size *fs);
 float osk_char_advance(uint32_t cp, const osk_font_size *fs);
 float osk_text_width(const uint32_t *cps, unsigned n, const osk_font_size *fs);
 float osk_utf8_width(const char *s, const osk_font_size *fs);
+
+/* candidate bar layout (osk_layouts.c) */
+#define OSK_BAR_X0		45.0f	/* candidate text area */
+#define OSK_BAR_X1		435.0f
+#define OSK_BAR_CY		152.0f
+#define OSK_BAR_GAP		20.0f
+extern const osk_font_size osk_cand_font;
+float osk_cand_width(const osk_candidate *c);
 
 /* text box layout */
 #define OSK_TEXT_X		51.0f
@@ -166,6 +227,10 @@ typedef enum {
 	OSK_TEX_FRAME_THICK,
 	OSK_TEX_FRAME_THIN,
 	OSK_TEX_POINTER,
+	OSK_TEX_BOOK_OPEN,
+	OSK_TEX_BOOK_CLOSED,
+	OSK_TEX_SCROLL,
+	OSK_TEX_ROUND,
 	OSK_TEX_IMAGES,			/* number of generated images */
 	OSK_TEX_FONT = OSK_TEX_IMAGES	/* the glyph atlas, handled by the backend */
 } osk_tex;

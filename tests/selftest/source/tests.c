@@ -78,6 +78,142 @@ static bool digits_only(uint32_t cp, void *user)
 	return cp >= '0' && cp <= '9';
 }
 
+static bool candidate_is(osk_keyboard *osk, unsigned i, const char *want)
+{
+	char buf[64];
+	OSK_CopyCandidate(osk, i, buf, sizeof(buf));
+	return !strcmp(buf, want);
+}
+
+static bool has_candidate(osk_keyboard *osk, const char *want)
+{
+	unsigned i;
+	for (i = 0; i < OSK_GetCandidateCount(osk); i++)
+		if (candidate_is(osk, i, want))
+			return true;
+	return false;
+}
+
+static void prediction_tests(void)
+{
+	static u8 junk[4096], cut[5000];
+	osk_config cfg;
+	osk_keyboard *osk;
+	osk_dictionary dict;
+	unsigned i, seed = 1;
+
+	OSK_DefaultConfig(&cfg);
+	cfg.dictionary = &osk_dict_en_us;
+	cfg.on_event = on_event;
+	osk = OSK_Create(&cfg);
+	check(OSK_GetPrediction(osk) && OSK_GetCandidateCount(osk) == 0, "prediction idle");
+
+	type(osk, "Hello wh");
+	check(OSK_GetCandidateCount(osk) > 4 && candidate_is(osk, 0, "why"), "candidates");
+	click(osk, 50, 152);				/* first candidate */
+	check(!strcmp(OSK_GetText(osk), "Hello why "), "pick candidate");
+	check(OSK_GetCandidateCount(osk) == 0, "no word after space");
+
+	OSK_SetText(osk, "Th");
+	check(candidate_is(osk, 0, "Th") && has_candidate(osk, "The"), "capitalised");
+	OSK_SetText(osk, "HEL");
+	check(has_candidate(osk, "HELLO"), "all caps");
+	OSK_SetText(osk, "resume");
+	check(candidate_is(osk, 0, "resume") && has_candidate(osk, "r\xC3\xA9sum\xC3\xA9"), "accent folding");
+	OSK_SetText(osk, "wi");
+	check(has_candidate(osk, "wii"), "extra words");
+	OSK_SetText(osk, "thx");
+	step(osk, OSK_BTN_CARET_LEFT, 0);
+	check(OSK_GetCandidateCount(osk) == 0, "caret inside a word");
+
+	/* D-pad: up twice from 'q' reaches the bar, right moves along it */
+	OSK_SetText(osk, "wh");
+	step(osk, OSK_BTN_UP, 0);
+	step(osk, OSK_BTN_UP, 0);
+	step(osk, OSK_BTN_SELECT, 0);
+	check(!strncmp(OSK_GetText(osk), "wh", 2) && OSK_GetLength(osk) > 3 &&
+	      OSK_GetText(osk)[OSK_GetLength(osk) - 1] == ' ', "d-pad candidate");
+
+	/* the prediction key */
+	OSK_SetText(osk, "wh");
+	click(osk, 133, 370);
+	check(!OSK_GetPrediction(osk) && OSK_GetCandidateCount(osk) == 0, "prediction off");
+	click(osk, 133, 370);
+	check(OSK_GetPrediction(osk) && OSK_GetCandidateCount(osk) > 0, "prediction on");
+
+	/* scrolling */
+	OSK_SetText(osk, "a");
+	rejects = 0;
+	click(osk, 458, 152);				/* left: already at the start */
+	check(rejects == 1, "scroll left rejected");
+	click(osk, 500, 152);
+	click(osk, 50, 152);
+	check(OSK_GetLength(osk) > 2 && !candidate_is(osk, 0, "a"), "scroll right");
+	OSK_Destroy(osk);
+
+	/* full buffer: only words that fit are offered */
+	cfg.max_chars = 8;
+	osk = OSK_Create(&cfg);
+	type(osk, "abcde th");
+	for (i = 0; i < OSK_GetCandidateCount(osk); i++) {
+		char buf[64];
+		if (OSK_CopyCandidate(osk, i, buf, sizeof(buf)) > 2)
+			break;
+	}
+	check(OSK_GetCandidateCount(osk) > 0 && i == OSK_GetCandidateCount(osk), "candidates fit");
+	OSK_ChooseCandidate(osk, 0);
+	check(OSK_GetLength(osk) == 8, "no room for the space");
+	OSK_Destroy(osk);
+
+	/* no prediction for passwords or on the numpad */
+	cfg.max_chars = 0;
+	cfg.flags = OSK_FLAG_PASSWORD;
+	cfg.initial = "wh";
+	osk = OSK_Create(&cfg);
+	check(!OSK_GetPrediction(osk) && OSK_GetCandidateCount(osk) == 0, "password");
+	OSK_Destroy(osk);
+	cfg.flags = 0;
+	cfg.layout = OSK_LAYOUT_NUMPAD;
+	osk = OSK_Create(&cfg);
+	check(OSK_GetCandidateCount(osk) == 0, "numpad");
+	OSK_Destroy(osk);
+	cfg.layout = OSK_LAYOUT_QWERTY;
+
+	/* German, and damaged dictionaries */
+	cfg.dictionary = &osk_dict_de;
+	cfg.initial = "uber";
+	osk = OSK_Create(&cfg);
+	check(candidate_is(osk, 0, "\xC3\xBC" "ber"), "german");
+	OSK_Destroy(osk);
+
+	check(!OSK_DictionaryFromMemory(&dict, "x", junk, 10, NULL, 0), "reject tiny zsd");
+	memcpy(junk, osk_dict_en_us.zsd, 64);
+	for (i = 64; i < sizeof(junk); i++) {
+		seed = seed * 1103515245 + 12345;
+		junk[i] = seed >> 16;
+	}
+	if (OSK_DictionaryFromMemory(&dict, "x", junk, sizeof(junk), junk, sizeof(junk))) {
+		cfg.dictionary = &dict;
+		cfg.initial = "a";
+		osk = OSK_Create(&cfg);
+		type(osk, "bcdefg");
+		OSK_Destroy(osk);
+	}
+	check(!OSK_DictionaryFromMemory(&dict, "en", osk_dict_en_us.zsd, 5000, NULL, 0), "truncated zsd");
+	/* cut short with a matching record size: links point past the end */
+	memcpy(cut, osk_dict_en_us.zsd, sizeof(cut));
+	cut[4] = 0;
+	cut[5] = (sizeof(cut) - 34) >> 8;
+	cut[6] = (sizeof(cut) - 34) & 0xFF;
+	check(OSK_DictionaryFromMemory(&dict, "en", cut, sizeof(cut), NULL, 0), "cut zsd");
+	cfg.dictionary = &dict;
+	cfg.initial = "t";
+	osk = OSK_Create(&cfg);
+	type(osk, "he");
+	check(osk != NULL, "damaged dictionary survives");
+	OSK_Destroy(osk);
+}
+
 void run_tests(void)
 {
 	osk_config cfg;
@@ -255,4 +391,6 @@ void run_tests(void)
 	check(OSK_CanDisplay('A') && OSK_CanDisplay(0xE9) && OSK_CanDisplay(0xC0) &&
 	      OSK_CanDisplay(0x20AC) && OSK_CanDisplay(0xA9) && OSK_CanDisplay(0x153) &&
 	      !OSK_CanDisplay(0x3042) && !OSK_CanDisplay('\n'), "font coverage");
+
+	prediction_tests();
 }

@@ -204,6 +204,24 @@ static void window(osk_tex tex, float c, float x, float y, float w, float h,
 	quad(tex, x + w - c, y + c, x + w, y + h - c, 1, e, 0, e, black, white, NULL);
 }
 
+/* rounded box stretched horizontally: the ends keep their shape */
+static void round_box(float x0, float y0, float x1, float y1, osk_color c)
+{
+	float r = (y1 - y0) / 2;
+
+	quad(OSK_TEX_ROUND, x0, y0, x0 + r, y1, 0, 0, 0.5f, 1, c_clear, c, NULL);
+	quad(OSK_TEX_ROUND, x0 + r, y0, x1 - r, y1, 0.5f, 0, 0.5f, 1, c_clear, c, NULL);
+	quad(OSK_TEX_ROUND, x1 - r, y0, x1, y1, 0.5f, 0, 1, 1, c_clear, c, NULL);
+}
+
+/* white window between the text box and the keys, with a plate
+   behind the scroll arrows */
+static void draw_bar(osk_keyboard *osk)
+{
+	window(OSK_TEX_FRAME_THIN, 8, 38, 134, 484, 36, with_alpha(grey(150), 0), c_white);
+	round_box(436, 137, 520, 167, grey(226));
+}
+
 static void draw_textbox(osk_keyboard *osk)
 {
 	const osk_theme *th = &osk->theme;
@@ -266,6 +284,8 @@ static const look_anim look_anims[] = {
 	[LOOK_PILL]	= { 1.1229f, 1.0453f, 3 },
 	[LOOK_TAB]	= { 1.1f,    1.0f,    3 },
 	[LOOK_PAD]	= { 1.4f,    1.3f,    7 },
+	[LOOK_SCROLL]	= { 1.15f,   1.05f,   3 },
+	[LOOK_CANDIDATE] = { 1.0f,   1.0f,    3 },
 };
 
 /* scale dips to push_scale 3 frames after the press and is back after 7 */
@@ -349,6 +369,25 @@ static void draw_key(osk_keyboard *osk, int idx)
 		white.b = clamp8(255 - 127 * p);
 		pic_c(OSK_TEX_TOOL, k->cx, k->cy, k->w, k->h, c_clear, white);
 		break;
+	case LOOK_SCROLL: {
+		bool can = k->kind == KEY_SCROLL_L ? osk->cand_first > 0 :
+			   osk->cand_first + osk->cand_shown < osk->ncand;
+		osk_color dark = can ? grey(64) : grey(190);
+		float s0 = k->kind == KEY_SCROLL_L ? 0 : 1;
+
+		white = mix(c_white, focus_white, f);
+		white.b = clamp8(white.b + (64 - white.b) * p);
+		quad(OSK_TEX_SCROLL, k->cx - k->w / 2, k->cy - k->h / 2, k->cx + k->w / 2, k->cy + k->h / 2,
+		     s0, 0, 1 - s0, 1, with_alpha(dark, 0), white, NULL);
+		break;
+	}
+	case LOOK_CANDIDATE:
+		if (f > 0 || p > 0) {
+			osk_color hl = mix(from_u32(th->focus_top), rgb(255, 255, 160), p);
+			round_box(k->cx - k->w / 2, k->cy - k->h / 2, k->cx + k->w / 2, k->cy + k->h / 2,
+				  with_alpha(hl, clamp8(255 * fmaxf(f, p))));
+		}
+		break;
 	}
 
 	/* contents */
@@ -394,6 +433,36 @@ static void draw_key(osk_keyboard *osk, int idx)
 		st = (text_style){ { 26, 30, 0 }, rgb(46, 46, 174), rgb(42, 42, 154) };
 		text_centered(&st, label, k->cx + 2, k->cy);
 		break;
+	case KEY_PREDICT: {
+		/* book icon on the left, the language name in a 117 px box */
+		float w;
+
+		if (latched)
+			pic_c(OSK_TEX_BOOK_OPEN, k->cx - 56, k->cy, 44, 28, with_alpha(grey(40), 0), c_white);
+		else
+			pic_c(OSK_TEX_BOOK_CLOSED, k->cx - 56, k->cy, 32, 28, with_alpha(grey(40), 0), c_white);
+		st = (text_style){ { 22, 26, 0 }, rgb(46, 46, 174), rgb(42, 42, 154) };
+		w = osk_utf8_width(label, &st.fs);
+		if (w > 117)
+			st.fs.sx *= 117 / w;
+		text_centered(&st, label, k->cx + 25, k->cy);
+		break;
+	}
+	case KEY_CANDIDATE: {
+		const osk_candidate *c = &osk->cand[k->cand];
+		float w = osk_text_width(c->cp, c->len, &osk_cand_font), x;
+		unsigned i;
+
+		st = (text_style){ osk_cand_font, grey(96), grey(96) };
+		if (w > OSK_BAR_X1 - OSK_BAR_X0) {
+			st.fs.sx *= (OSK_BAR_X1 - OSK_BAR_X0) / w;
+			w = OSK_BAR_X1 - OSK_BAR_X0;
+		}
+		x = k->cx - w / 2;
+		for (i = 0; i < c->len; i++)
+			x += glyph(&st, c->cp[i], x, k->cy - st.fs.sy / 2);
+		break;
+	}
 	case KEY_OK:
 	case KEY_CANCEL:
 		st = (text_style){ { 27, 29, -1 }, grey(0), grey(0) };
@@ -458,6 +527,8 @@ void osk_render(osk_keyboard *osk)
 	}
 	draw_keys(osk, true);
 	draw_textbox(osk);
+	if (osk_predict_active(osk))
+		draw_bar(osk);
 	draw_keys(osk, false);
 
 	if (osk->pointer_valid && !(osk->cfg.flags & OSK_FLAG_NO_POINTER))

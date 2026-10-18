@@ -2,12 +2,14 @@
 
 On-screen software keyboard library for Wii homebrew, built on libogc / GX.
 
-![QWERTY, the More page, AZERTY and the numpad](docs/layouts.png)
+![QWERTY with word prediction, the More page, AZERTY and the numpad](docs/layouts.png)
 
 - The look and feel of the Wii system keyboard: glass keys that grow under the pointer, a two-line
   text box with a pulsing caret, Quit / OK buttons and letters / numpad tabs in the toolbar
 - QWERTY (US), QWERTZ (German), AZERTY (French) and numeric keypad layouts
 - A "More" page on every letter layout with accented Latin-1 letters, `€` and extra symbols
+- Predictive text in nine languages from the Wii keyboard's eZiText dictionaries, with a
+  candidate bar like the system keyboard's; only the languages you reference are linked
 - Shift (one-shot), Caps Lock, caret movement, auto-repeat, max length, password mode, optional
   line breaks
 - Input from the Wii Remote pointer and buttons, the Classic Controller, the GameCube controller and USB keyboards
@@ -91,6 +93,52 @@ if (OSK_Prompt(&cfg, rmode, xfb, name, sizeof(name)) == OSK_STATUS_DONE)
 initialised GX. It takes over the display and restores your framebuffer contents when it returns.
 It switches the Wii Remote on channel 0 to IR mode, so set your own data format again afterwards.
 
+## Predictive text
+
+```c
+cfg.dictionary = &osk_dict_en_us;
+```
+
+This adds a prediction key with a book icon and the language name at the bottom left of the
+letter pages. While prediction is on, a bar above the keys suggests words that start with the
+letters before the caret. Choosing one replaces the word and adds a space. Suggestions follow the
+typed capitalisation (`Th` → `The`, `HEL` → `HELLO`). A base letter also matches its accented
+forms (`resume` → `résumé`), but an accented letter only matches itself. Point at a word and press
+A, or press Up from the top key row and use the D-pad. The arrows at the right of the bar page
+through up to 20 suggestions. Prediction never appears in password mode or on the numpad.
+
+| Dictionary         | Language                | Size   |
+|--------------------|-------------------------|--------|
+| `osk_dict_en_us`   | English (US)            | 86 KB  |
+| `osk_dict_en_gb`   | English (UK)            | 95 KB  |
+| `osk_dict_de`      | German                  | 108 KB |
+| `osk_dict_fr`      | French                  | 82 KB  |
+| `osk_dict_fr_ca`   | French (Canada)         | 79 KB  |
+| `osk_dict_es`      | Spanish                 | 114 KB |
+| `osk_dict_es_la`   | Spanish (Latin America) | 111 KB |
+| `osk_dict_it`      | Italian                 | 110 KB |
+| `osk_dict_nl`      | Dutch                   | 106 KB |
+
+Each dictionary is a separate object in `libwiiosk.a`, so only the ones you reference are linked.
+To use dictionary files instead, for example from SD, load an eZiText `.zsd` (and optionally a
+`.znd` of extra words) into memory and wrap them:
+
+```c
+osk_dictionary dict;
+if (OSK_DictionaryFromMemory(&dict, "English", zsd, zsd_size, znd, znd_size))
+    cfg.dictionary = &dict;     /* the buffers must outlive the keyboard */
+```
+
+Damaged files cannot crash the keyboard: every read is bounds-checked and every search has a step
+budget. `OSK_FLAG_PREDICT_OFF` starts with prediction switched off. `OSK_SetPrediction()`,
+`OSK_GetCandidateCount()`, `OSK_CopyCandidate()` and `OSK_ChooseCandidate()` give programmatic
+access.
+
+The dictionaries store no word frequencies, but their word graph lists common words first. wiiosk
+ranks the typed word itself first, then its accented forms, then the graph's order. Up to two of
+the extra words (Wii, Nunchuk, …) are placed after the first three suggestions.
+`tools/mkdict.py <eZiTextTools data dir> source/dict` regenerates `source/dict/`.
+
 ## Controls
 
 | Action        | Wii Remote | Classic | GameCube      | USB keyboard  |
@@ -114,7 +162,6 @@ at the right of the text box move the caret a line up or down.
   refused are drawn greyed out.
 - `on_event`: a callback for focus changes, key presses, rejects, done and cancel. Use it for sounds
   or rumble; `example/gx` uses it for Wii-Menu-style rumble.
-- `theme`: copy `*OSK_DefaultTheme()` and change the colours you want.
 - `theme`: copy `*OSK_DefaultTheme()` and change the colours you want. Since 2.0 only some fields
   have an effect; `wiiosk.h` lists them.
 - Flags:
@@ -127,6 +174,7 @@ at the right of the text box move the caret a line up or down.
   - `OSK_FLAG_MULTILINE`: Enter inserts `\n` instead of confirming
   - `OSK_FLAG_NO_ENTER`: hide the Enter key
   - `OSK_FLAG_LOCK_LAYOUT`: hide the letters / numpad tabs
+  - `OSK_FLAG_PREDICT_OFF`: start with word prediction switched off
   - `OSK_FLAG_NO_HINTS`: no effect since 2.0
 
 The keyboard accepts any character `OSK_CanDisplay()` reports. That covers printable ASCII,
@@ -148,7 +196,8 @@ Latin-1, `Œ œ` and `€`. It does not include CJK.
 `tests/selftest` drives `OSK_Update()` with scripted input and needs no controller. It covers
 editing, max length, UTF-8, navigation and wrap, Shift and Caps, the More page, auto-repeat, 4:3 and
 16:9 pointer mapping, the caret pointer, Enter and line breaks, the toolbar buttons and tabs, the
-German and French tables, filters and flags. On the Wii the verdict appears in the text box
+German and French tables, filters and flags, and word prediction (ranking, capitalisation, accents,
+the bar, scrolling, the length limit and damaged dictionaries). On the Wii the verdict appears in the text box
 (`SELFTEST PASS n/n`), then it cycles through every layout for a visual check. It runs in Dolphin.
 
 The same cases also build for the desktop, together with a preview tool that draws the keyboard
@@ -168,7 +217,9 @@ source/                 library sources
 example/gx              GX integration example
 example/console         OSK_Prompt() example
 tests/selftest          scripted self-test
+source/dict/            generated dictionaries, one object per language
 tools/mkfont.py         generates source/osk_font_data.c from the font
+tools/mkdict.py         generates source/dict/ from eZiText dictionaries
 tools/preview           desktop build: previews and self-test
 nintendo_sdk_original/  original SDK package (local reference only, git-ignored)
 ```
@@ -179,7 +230,13 @@ This folder used to hold Nintendo's 2009 *Software Keyboard* SDK sample, which i
 SDK code. That material is kept in `nintendo_sdk_original/` only for local reference and must not be
 redistributed. wiiosk is a separate, original implementation that uses only libogc. The look is
 modelled on the Wii system keyboard and recreated with procedurally generated graphics; no Nintendo
-code, layouts, textures or sounds are included.
+code, layouts or textures are included.
+
+The dictionaries in `source/dict/` are not original work. They are the eZiText word lists by Zi
+Corporation that ship with the Wii keyboard (`eZTSystem*.zsd`, `eZTNintendo*.znd`), as published
+in [eZiTextTools](https://github.com/quatric/eZiTextTools). `tools/mkdict.py` keeps only the word
+graph and the blocklist. They are not covered by the zlib license. If that matters for your project,
+leave `cfg.dictionary` unset (then nothing of them is linked) or load your own dictionary.
 
 The font is FOT-Rodin NTLG Pro DB by Fontworks, the typeface used by the Wii system menu. It is a
 commercial font and is not included; `source/osk_font_data.c` holds glyph bitmaps rendered from it by

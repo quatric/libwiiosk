@@ -151,6 +151,8 @@ static void build_letters(osk_keyboard *osk, const letter_table *t)
 	add_key(osk, KEY_SHIFT, LOOK_SPECIAL, 93, 295, 94, 32, 96, 35);
 	add_key(osk, KEY_SPACE, LOOK_SPACE, 341, 330, 156, 32, 161, 35);
 	add_key(osk, KEY_ALT, LOOK_MORE, 506, 369, 174, 40, 174, 40);
+	if (osk->dict.ok)
+		add_key(osk, KEY_PREDICT, LOOK_MORE, 133, 370, 174, 40, 174, 40);
 }
 
 static void build_numpad(osk_keyboard *osk)
@@ -195,6 +197,50 @@ void osk_build_keys(osk_keyboard *osk)
 		add_key(osk, KEY_TAB_NUMPAD, LOOK_TAB, 352, 424, 58, 38, 60, 40);
 	}
 	add_key(osk, KEY_OK, LOOK_PILL, 518, 425, 172, 52, 172, 48);
+
+	osk->nbase = osk->nkeys;
+	osk_build_bar(osk);
+}
+
+/*-------------------------------------------------------------
+  candidate bar
+-------------------------------------------------------------*/
+const osk_font_size osk_cand_font = { 23.4f, 24.3f, 0 };
+
+/* text width, squeezed to fit the bar */
+float osk_cand_width(const osk_candidate *c)
+{
+	float w = osk_text_width(c->cp, c->len, &osk_cand_font);
+	return w < OSK_BAR_X1 - OSK_BAR_X0 ? w : OSK_BAR_X1 - OSK_BAR_X0;
+}
+
+/* the scroll arrows, then the candidates of the page starting at
+   cand_first that fit */
+void osk_build_bar(osk_keyboard *osk)
+{
+	float x = OSK_BAR_X0;
+	unsigned i;
+
+	osk->nkeys = osk->nbase;
+	osk->cand_shown = 0;
+	if (!osk_predict_active(osk))
+		return;
+	add_key(osk, KEY_SCROLL_L, LOOK_SCROLL, 458, OSK_BAR_CY, 36, 32, 42, 36);
+	add_key(osk, KEY_SCROLL_R, LOOK_SCROLL, 500, OSK_BAR_CY, 36, 32, 42, 36);
+	for (i = osk->cand_first; i < osk->ncand; i++) {
+		float w = osk_cand_width(&osk->cand[i]);
+		osk_key *k;
+
+		if (x + w > OSK_BAR_X1 && i > osk->cand_first)
+			break;
+		k = add_key(osk, KEY_CANDIDATE, LOOK_CANDIDATE, x + w / 2, OSK_BAR_CY, w + 12, 30,
+			    w + OSK_BAR_GAP, 36);
+		if (!k)
+			break;
+		k->cand = i;
+		x += w + OSK_BAR_GAP;
+		osk->cand_shown++;
+	}
 }
 
 uint32_t osk_key_char(const osk_keyboard *osk, const osk_key *k)
@@ -217,6 +263,7 @@ const char *osk_key_label(const osk_keyboard *osk, const osk_key *k)
 	case KEY_ALT:		return osk->alt ? "Back" : "More";
 	case KEY_OK:		return "OK";
 	case KEY_CANCEL:	return "Quit";
+	case KEY_PREDICT:	return osk->dict.name;
 	default:		return NULL;
 	}
 }
@@ -228,6 +275,7 @@ bool osk_key_latched(const osk_keyboard *osk, const osk_key *k)
 	case KEY_CAPS:		return osk->caps;
 	case KEY_TAB_LETTERS:	return !osk->numpad;
 	case KEY_TAB_NUMPAD:	return osk->numpad;
+	case KEY_PREDICT:	return osk->predict;
 	default:		return false;
 	}
 }

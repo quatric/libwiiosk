@@ -17,9 +17,9 @@ extern "C" {
 #endif
 
 #define WIIOSK_VERSION_MAJOR	2
-#define WIIOSK_VERSION_MINOR	0
+#define WIIOSK_VERSION_MINOR	1
 #define WIIOSK_VERSION_PATCH	0
-#define WIIOSK_VERSION_STRING	"2.0.0"
+#define WIIOSK_VERSION_STRING	"2.1.0"
 
 /* Hard upper bound for the number of characters (code points) in the buffer. */
 #define OSK_MAX_CHARS		256
@@ -46,8 +46,31 @@ enum {
 	OSK_FLAG_GX_READY	= 1 << 6,	/* OSK_Prompt(): GX was already initialised by the app */
 	OSK_FLAG_MULTILINE	= 1 << 7,	/* Enter inserts a line break instead of confirming */
 	OSK_FLAG_NO_ENTER	= 1 << 8,	/* hide the Enter key */
-	OSK_FLAG_LOCK_LAYOUT	= 1 << 9	/* hide the letters / numpad tabs */
+	OSK_FLAG_LOCK_LAYOUT	= 1 << 9,	/* hide the letters / numpad tabs */
+	OSK_FLAG_PREDICT_OFF	= 1 << 10	/* start with word prediction switched off */
 };
+
+/* Word list for predictive text: an eZiText static dictionary (.zsd) and
+   optionally an extra word list (.znd), both kept in memory by the app.
+   The built-in dictionaries below are separate objects, so only the ones
+   an app references are linked (each adds 75-110 KB). */
+typedef struct {
+	const char *name;		/* UTF-8, shown on the prediction key */
+	const void *zsd;
+	size_t zsd_size;
+	const void *znd;		/* may be NULL */
+	size_t znd_size;
+} osk_dictionary;
+
+extern const osk_dictionary osk_dict_en_us;	/* English (US) */
+extern const osk_dictionary osk_dict_en_gb;	/* English (UK) */
+extern const osk_dictionary osk_dict_de;	/* German */
+extern const osk_dictionary osk_dict_fr;	/* French */
+extern const osk_dictionary osk_dict_fr_ca;	/* French (Canada) */
+extern const osk_dictionary osk_dict_es;	/* Spanish */
+extern const osk_dictionary osk_dict_es_la;	/* Spanish (Latin America) */
+extern const osk_dictionary osk_dict_it;	/* Italian */
+extern const osk_dictionary osk_dict_nl;	/* Dutch */
 
 typedef enum {
 	OSK_STATUS_EDITING = 0,
@@ -107,6 +130,11 @@ typedef struct {
 	bool (*filter)(uint32_t codepoint, void *user);
 	void (*on_event)(osk_keyboard *osk, osk_event event, void *user);
 	void *user;
+
+	/* Since 2.1. Word prediction: shows a prediction key on the letter
+	   pages and, while it is on, a bar of suggested words above the keys.
+	   NULL disables prediction. Never used with OSK_FLAG_PASSWORD. */
+	const osk_dictionary *dictionary;
 } osk_config;
 
 /* Abstract buttons understood by OSK_Update(). */
@@ -190,6 +218,23 @@ void OSK_Resume(osk_keyboard *osk);
    Returns OSK_STATUS_DONE or OSK_STATUS_CANCELLED. */
 osk_status OSK_Prompt(const osk_config *cfg, GXRModeObj *rmode, void *xfb,
 		      char *out, size_t out_size);
+
+/* Fill d from .zsd / .znd files loaded by the app (e.g. from SD); the
+   buffers must stay valid while a keyboard uses them. znd may be NULL.
+   Returns false if the .zsd is not usable. */
+bool OSK_DictionaryFromMemory(osk_dictionary *d, const char *name,
+			      const void *zsd, size_t zsd_size,
+			      const void *znd, size_t znd_size);
+
+/* Prediction state, toggled by the prediction key. */
+void OSK_SetPrediction(osk_keyboard *osk, bool on);
+bool OSK_GetPrediction(const osk_keyboard *osk);
+/* Suggestions for the word before the caret, best first. */
+unsigned OSK_GetCandidateCount(const osk_keyboard *osk);
+/* Copy candidate i as UTF-8 (like OSK_CopyText); returns 0 if there is none. */
+size_t OSK_CopyCandidate(const osk_keyboard *osk, unsigned i, char *buf, size_t size);
+/* Replace the word before the caret by candidate i, followed by a space. */
+bool OSK_ChooseCandidate(osk_keyboard *osk, unsigned i);
 
 /* UTF-8 helpers used by the library, exported for convenience. */
 size_t OSK_UTF8Encode(uint32_t cp, char out[4]);

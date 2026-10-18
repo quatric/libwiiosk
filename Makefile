@@ -21,7 +21,7 @@ LIBDIR		:=	lib
 CFLAGS		:=	-g -O2 -Wall -Wextra -Wno-unused-parameter $(MACHDEP) \
 			-I$(CURDIR)/$(INCLUDES) -I$(LIBOGC_INC)
 
-CFILES		:=	$(wildcard $(SOURCES)/*.c)
+CFILES		:=	$(wildcard $(SOURCES)/*.c) $(wildcard $(SOURCES)/dict/*.c)
 OFILES		:=	$(patsubst $(SOURCES)/%.c,$(BUILD)/%.o,$(CFILES))
 DEPENDS		:=	$(OFILES:.o=.d)
 
@@ -37,6 +37,7 @@ $(LIBDIR)/$(TARGET): $(OFILES) | $(LIBDIR)
 	@$(AR) -rcs $@ $^
 
 $(BUILD)/%.o: $(SOURCES)/%.c | $(BUILD)
+	@mkdir -p $(dir $@)
 	@echo $(notdir $<)
 	@$(CC) -MMD -MP $(CFLAGS) -c $< -o $@
 

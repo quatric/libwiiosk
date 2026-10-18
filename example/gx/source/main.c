@@ -97,11 +97,12 @@ int main(int argc, char **argv)
 		unsigned flags, max;
 		const char *title;
 		bool (*filter)(uint32_t, void *);
+		const osk_dictionary *dictionary;
 	} demos[] = {
-		{ OSK_LAYOUT_QWERTY, 0, 32, "Enter your name", NULL },
-		{ OSK_LAYOUT_QWERTZ, OSK_FLAG_PASSWORD | OSK_FLAG_REQUIRE_TEXT, 16, "Passwort", NULL },
-		{ OSK_LAYOUT_AZERTY, 0, 64, "Message", NULL },
-		{ OSK_LAYOUT_NUMPAD, OSK_FLAG_REQUIRE_TEXT, 4, "PIN (4 digits)", digits_only },
+		{ OSK_LAYOUT_QWERTY, 0, 64, "Write a message", NULL, &osk_dict_en_us },
+		{ OSK_LAYOUT_QWERTZ, OSK_FLAG_PASSWORD | OSK_FLAG_REQUIRE_TEXT, 16, "Passwort", NULL, NULL },
+		{ OSK_LAYOUT_AZERTY, 0, 64, "Message", NULL, &osk_dict_fr },
+		{ OSK_LAYOUT_NUMPAD, OSK_FLAG_REQUIRE_TEXT, 4, "PIN (4 digits)", digits_only, NULL },
 	};
 	char title[160], result[OSK_MAX_CHARS * 4 + 1] = "";
 	osk_config cfg;
@@ -125,6 +126,7 @@ int main(int argc, char **argv)
 			cfg.flags = demos[demo].flags | (widescreen ? OSK_FLAG_WIDESCREEN : 0);
 			cfg.max_chars = demos[demo].max;
 			cfg.filter = demos[demo].filter;
+			cfg.dictionary = demos[demo].dictionary;
 			cfg.on_event = on_event;
 			cfg.screen_width = rmode->fbWidth;
 			cfg.screen_height = rmode->efbHeight;

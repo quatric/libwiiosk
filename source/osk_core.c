@@ -361,6 +361,120 @@ static void switch_page(osk_keyboard *osk, bool numpad)
 		osk->keys[i].focus = 1;
 }
 
+/*-------------------------------------------------------------
+  word prediction
+-------------------------------------------------------------*/
+/* key nearest to x in the first key row below the candidate bar */
+static int key_below_bar(const osk_keyboard *osk, float x)
+{
+	float best = 1e9f, score;
+	int i, found = default_key(osk);
+
+	for (i = 0; i < osk->nbase; i++) {
+		const osk_key *k = &osk->keys[i];
+		if (k->cy <= OSK_BAR_CY + SAME_ROW)
+			continue;
+		score = roundf((k->cy - OSK_BAR_CY) / SAME_ROW) * 1000.0f + fabsf(k->cx - x);
+		if (score < best) {
+			best = score;
+			found = i;
+		}
+	}
+	return found;
+}
+
+/* re-add the bar's keys; focus stays on the same slot if possible */
+static void rebuild_bar(osk_keyboard *osk)
+{
+	int old = osk->focus, idx;
+	key_kind kind = old >= 0 ? osk->keys[old].kind : KEY_CHAR;
+	float x = old >= 0 ? osk->keys[old].cx : 0;
+
+	osk_build_bar(osk);
+	if (osk->pointer_valid) {
+		osk->focus = key_at(osk, osk->px, osk->py);
+		return;
+	}
+	if (old < osk->nbase)
+		return;
+	if (old < osk->nkeys && osk->keys[old].kind == kind)
+		idx = old;
+	else if (kind == KEY_CANDIDATE && osk->keys[osk->nkeys - 1].kind == KEY_CANDIDATE)
+		idx = osk->nkeys - 1;
+	else
+		idx = key_below_bar(osk, x);
+	osk->focus = idx;
+	osk->keys[idx].focus = 1;
+}
+
+static void refresh_prediction(osk_keyboard *osk, bool force)
+{
+	if (osk_predict_update(osk, force))
+		rebuild_bar(osk);
+}
+
+/* first candidate of the page before the visible one */
+static unsigned previous_page(const osk_keyboard *osk)
+{
+	unsigned i = osk->cand_first;
+	float x = OSK_BAR_X0;
+
+	while (i > 0) {
+		float w = osk_cand_width(&osk->cand[i - 1]);
+		if (x + w > OSK_BAR_X1 && i != osk->cand_first)
+			break;
+		x += w + OSK_BAR_GAP;
+		i--;
+	}
+	return i;
+}
+
+static void scroll_candidates(osk_keyboard *osk, int dir)
+{
+	if (dir < 0 && osk->cand_first > 0)
+		osk->cand_first = previous_page(osk);
+	else if (dir > 0 && osk->cand_first + osk->cand_shown < osk->ncand)
+		osk->cand_first += osk->cand_shown;
+	else {
+		reject(osk);
+		return;
+	}
+	rebuild_bar(osk);
+}
+
+static bool choose_candidate(osk_keyboard *osk, unsigned i)
+{
+	const osk_candidate *c = &osk->cand[i];
+	unsigned start = osk->word_start, n = osk->word_len;
+
+	if (i >= osk->ncand || osk->caret != start + n ||
+	    osk->len - n + c->len > osk->max_chars) {
+		reject(osk);
+		return false;
+	}
+	memmove(&osk->text[start + c->len], &osk->text[start + n],
+		(osk->len - start - n) * sizeof(uint32_t));
+	memcpy(&osk->text[start], c->cp, c->len * sizeof(uint32_t));
+	osk->len = osk->len - n + c->len;
+	osk->caret = start + c->len;
+	osk->utf8_dirty = true;
+
+	/* followed by a space */
+	if (osk->caret < osk->len && osk->text[osk->caret] == ' ')
+		osk->caret++;
+	else if (osk->len < osk->max_chars && osk_accepts(osk, ' '))
+		insert_char(osk, ' ');
+	refresh_prediction(osk, false);
+	ensure_caret_visible(osk);
+	return true;
+}
+
+static void toggle_prediction(osk_keyboard *osk)
+{
+	osk->predict = !osk->predict;
+	refresh_prediction(osk, true);
+}
+
 static void press_key(osk_keyboard *osk, int idx, bool repeat)
 {
 	osk_key *k = &osk->keys[idx];
@@ -405,6 +519,16 @@ static void press_key(osk_keyboard *osk, int idx, bool repeat)
 		break;
 	case KEY_TAB_NUMPAD:
 		switch_page(osk, true);
+		break;
+	case KEY_PREDICT:
+		toggle_prediction(osk);
+		break;
+	case KEY_SCROLL_L:
+	case KEY_SCROLL_R:
+		scroll_candidates(osk, k->kind == KEY_SCROLL_L ? -1 : 1);
+		break;
+	case KEY_CANDIDATE:
+		choose_candidate(osk, k->cand);
 		break;
 	}
 }
@@ -505,6 +629,9 @@ osk_keyboard *OSK_Create(const osk_config *cfg)
 
 	osk->numpad = cfg->layout == OSK_LAYOUT_NUMPAD;
 	osk->letters = osk->numpad ? OSK_LAYOUT_QWERTY : cfg->layout;
+	if (cfg->dictionary && !(cfg->flags & OSK_FLAG_PASSWORD))
+		osk_dict_parse(&osk->dict, cfg->dictionary);
+	osk->predict = !(cfg->flags & OSK_FLAG_PREDICT_OFF);
 	osk_build_keys(osk);
 	osk->focus = default_key(osk);
 	osk->keys[osk->focus].focus = 1;
@@ -540,6 +667,7 @@ void OSK_SetText(osk_keyboard *osk, const char *utf8)
 	osk->scroll = 0;
 	osk->utf8_dirty = true;
 	ensure_caret_visible(osk);
+	refresh_prediction(osk, true);
 }
 
 const char *OSK_GetText(osk_keyboard *osk)
@@ -683,7 +811,55 @@ osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 			cancel(osk);
 	}
 
+	refresh_prediction(osk, false);
 	animate(osk);
 	ensure_caret_visible(osk);
 	return osk->status;
+}
+
+void OSK_SetPrediction(osk_keyboard *osk, bool on)
+{
+	if (osk->predict != on)
+		toggle_prediction(osk);
+}
+
+bool OSK_GetPrediction(const osk_keyboard *osk)
+{
+	return osk->dict.ok && osk->predict;
+}
+
+unsigned OSK_GetCandidateCount(const osk_keyboard *osk)
+{
+	return osk->ncand;
+}
+
+size_t OSK_CopyCandidate(const osk_keyboard *osk, unsigned i, char *buf, size_t size)
+{
+	size_t pos = 0, n;
+	unsigned j;
+	char tmp[4];
+
+	if (!buf || !size)
+		return 0;
+	buf[0] = 0;
+	if (i >= osk->ncand)
+		return 0;
+	for (j = 0; j < osk->cand[i].len; j++) {
+		n = OSK_UTF8Encode(osk->cand[i].cp[j], tmp);
+		if (pos + n >= size)
+			break;
+		memcpy(&buf[pos], tmp, n);
+		pos += n;
+	}
+	buf[pos] = 0;
+	return pos;
+}
+
+bool OSK_ChooseCandidate(osk_keyboard *osk, unsigned i)
+{
+	if (i >= osk->ncand) {
+		reject(osk);
+		return false;
+	}
+	return choose_candidate(osk, i);
 }
