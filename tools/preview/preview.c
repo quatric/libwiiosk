@@ -177,6 +177,30 @@ int main(int argc, char **argv)
 	shoot(osk, "us_predict_off");
 	OSK_Destroy(osk);
 
+	{
+		/* every language's layout with its dictionary, as picked by
+		   OSK_UseSystemLanguage() */
+		static const struct {
+			osk_language lang;
+			const char *text, *name;
+		} langs[] = {
+			{ OSK_LANG_EN_GB, "Favourite col", "uk" },
+			{ OSK_LANG_IT, "Buona sera, per", "it" },
+			{ OSK_LANG_ES, "Ma\xC3\xB1" "ana que", "es" },
+			{ OSK_LANG_NL, "Goedemorgen gro", "nl" },
+		};
+		unsigned i;
+
+		for (i = 0; i < sizeof(langs) / sizeof(langs[0]); i++) {
+			dictionary = OSK_LanguageDictionary(langs[i].lang);
+			osk = make(OSK_LanguageLayout(langs[i].lang), 0, NULL, langs[i].text);
+			unfocus(osk);
+			osk->frame = 11;
+			shoot(osk, langs[i].name);
+			OSK_Destroy(osk);
+		}
+	}
+
 	dictionary = &osk_dict_fr;
 	osk = make(OSK_LAYOUT_AZERTY, 0, NULL, "Il a \xC3\xA9t\xC3\xA9 fran");
 	unfocus(osk);

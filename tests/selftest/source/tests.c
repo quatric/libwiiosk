@@ -193,17 +193,43 @@ static void language_tests(void)
 		if (osk_conf_language(cases[i].lang, cases[i].area, cases[i].region) != cases[i].want)
 			ok = false;
 	check(ok, "system language");
+	check(OSK_LanguageLayout(OSK_LANG_EN_US) == OSK_LAYOUT_QWERTY &&
+	      OSK_LanguageLayout(OSK_LANG_EN_GB) == OSK_LAYOUT_QWERTY_UK &&
+	      OSK_LanguageLayout(OSK_LANG_DE) == OSK_LAYOUT_QWERTZ &&
+	      OSK_LanguageLayout(OSK_LANG_FR_CA) == OSK_LAYOUT_AZERTY &&
+	      OSK_LanguageLayout(OSK_LANG_ES_LA) == OSK_LAYOUT_QWERTY_ES &&
+	      OSK_LanguageLayout(OSK_LANG_IT) == OSK_LAYOUT_QWERTY_IT &&
+	      OSK_LanguageLayout(OSK_LANG_NL) == OSK_LAYOUT_QWERTY_NL &&
+	      OSK_LanguageLayout(OSK_LANG_NONE) == OSK_LAYOUT_QWERTY, "language layout");
 	check(OSK_LanguageDictionary(OSK_LANG_EN_GB) == &osk_dict_en_gb &&
 	      OSK_LanguageDictionary(OSK_LANG_NL) == &osk_dict_nl &&
 	      !OSK_LanguageDictionary(OSK_LANG_NONE), "language dictionary");
 #ifdef GEKKO
 	check(OSK_SystemDictionary() == OSK_LanguageDictionary(OSK_SystemLanguage()), "system dictionary");
+	{
+		osk_config c;
+		OSK_DefaultConfig(&c);
+		OSK_UseSystemLanguage(&c);
+		check(c.layout == OSK_SystemLayout() && c.dictionary == OSK_SystemDictionary(), "use system language");
+		c.layout = OSK_LAYOUT_NUMPAD;
+		OSK_UseSystemLanguage(&c);
+		check(c.layout == OSK_LAYOUT_NUMPAD, "system language keeps the numpad");
+	}
 #endif
 }
 
+/* charset c a t r d o g; graph c(->d) a t r, d o g */
+static const u8 mini_zsd[] = {
+	0, 0, 0, 0,
+	0, 0, 34, 0, 0, 34,  0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0,  0, 0, 0, 0, 0, 0,  0, 0, 1, 0, 0, 68,
+	0, 0, 0, 21,  0, 'c', 0, 'a', 0, 't', 0, 'r', 0, 'd', 0, 'o', 0, 'g',  0, 0, 0, 0, 0, 0, 0,
+	0x70, 0, 6, 0x11, 0x32, 0x03, 0x14, 0x15, 0x06,
+	3, 'c', 'a', 'r',
+};
+
 static void prediction_tests(void)
 {
-	static u8 junk[4096], cut[5000];
+	static u8 junk[4096];
 	osk_config cfg;
 	osk_keyboard *osk;
 	osk_dictionary dict;
@@ -286,37 +312,44 @@ static void prediction_tests(void)
 	OSK_Destroy(osk);
 	cfg.layout = OSK_LAYOUT_QWERTY;
 
-	/* German, and damaged dictionaries */
+	/* German, unpacked again after OSK_FreeDictionaries() */
 	cfg.dictionary = &osk_dict_de;
 	cfg.initial = "uber";
 	osk = OSK_Create(&cfg);
 	check(candidate_is(osk, 0, "\xC3\xBC" "ber"), "german");
 	OSK_Destroy(osk);
+	OSK_FreeDictionaries();
+	osk = OSK_Create(&cfg);
+	check(candidate_is(osk, 0, "\xC3\xBC" "ber"), "dictionary unpacked again");
+	OSK_Destroy(osk);
 
+	/* a hand made .zsd: cat, car, dog, with "car" blocked */
 	check(!OSK_DictionaryFromMemory(&dict, "x", junk, 10, NULL, 0), "reject tiny zsd");
-	memcpy(junk, osk_dict_en_us.zsd, 64);
-	for (i = 64; i < sizeof(junk); i++) {
+	check(!OSK_DictionaryFromMemory(&dict, "x", mini_zsd, 50, NULL, 0), "reject truncated zsd");
+	check(OSK_DictionaryFromMemory(&dict, "Mini", mini_zsd, sizeof(mini_zsd), NULL, 0), "zsd from memory");
+	cfg.dictionary = &dict;
+	cfg.initial = "ca";
+	osk = OSK_Create(&cfg);
+	check(OSK_GetCandidateCount(osk) == 1 && candidate_is(osk, 0, "cat"), "mini dictionary, blocklist");
+	OSK_SetText(osk, "Do");
+	check(OSK_GetCandidateCount(osk) == 1 && candidate_is(osk, 0, "Dog"), "mini dictionary");
+	OSK_Destroy(osk);
+
+	/* random graph behind a valid header */
+	memcpy(junk, mini_zsd, 40);
+	for (i = 40; i < sizeof(junk); i++) {
 		seed = seed * 1103515245 + 12345;
 		junk[i] = seed >> 16;
 	}
-	if (OSK_DictionaryFromMemory(&dict, "x", junk, sizeof(junk), junk, sizeof(junk))) {
-		cfg.dictionary = &dict;
-		cfg.initial = "a";
-		osk = OSK_Create(&cfg);
-		type(osk, "bcdefg");
-		OSK_Destroy(osk);
-	}
-	check(!OSK_DictionaryFromMemory(&dict, "en", osk_dict_en_us.zsd, 5000, NULL, 0), "truncated zsd");
-	/* cut short with a matching record size: links point past the end */
-	memcpy(cut, osk_dict_en_us.zsd, sizeof(cut));
-	cut[4] = 0;
-	cut[5] = (sizeof(cut) - 34) >> 8;
-	cut[6] = (sizeof(cut) - 34) & 0xFF;
-	check(OSK_DictionaryFromMemory(&dict, "en", cut, sizeof(cut), NULL, 0), "cut zsd");
-	cfg.dictionary = &dict;
-	cfg.initial = "t";
+	junk[4] = 0;
+	junk[5] = (sizeof(junk) - 34) >> 8;
+	junk[6] = (sizeof(junk) - 34) & 0xFF;
+	check(OSK_DictionaryFromMemory(&dict, "x", junk, sizeof(junk), junk, sizeof(junk)), "junk zsd");
+	cfg.initial = "a";
 	osk = OSK_Create(&cfg);
-	type(osk, "he");
+	type(osk, "bcdefg");
+	OSK_SetText(osk, "e");
+	OSK_SetText(osk, "t");
 	check(osk != NULL, "damaged dictionary survives");
 	OSK_Destroy(osk);
 }
@@ -465,6 +498,31 @@ void run_tests(void)
 	click(osk, 303, 225);				/* 'z' */
 	check(!strcmp(OSK_GetText(osk), "[z"), "qwertz");
 	OSK_Destroy(osk);
+
+	/* UK, Italian, Spanish, Dutch: the key left of Enter's row end and the
+	   first extra key of the bottom row */
+	{
+		static const struct { osk_layout l; const char *want; } extra[] = {
+			{ OSK_LAYOUT_QWERTY_UK, ";\xC2\xA3" },	/* ';', Shift+'3' */
+			{ OSK_LAYOUT_QWERTY_IT, "+\xC2\xA3" },
+			{ OSK_LAYOUT_QWERTY_ES, "\xC3\xB1$" },	/* n tilde, Shift+'3' */
+			{ OSK_LAYOUT_QWERTY_NL, ":#" },
+		};
+		unsigned k;
+		bool ok = true;
+
+		for (k = 0; k < 4; k++) {
+			cfg.layout = extra[k].l;
+			osk = OSK_Create(&cfg);
+			click(osk, 540, 260);			/* last key of row 2 */
+			click(osk, 93, 295);			/* Shift */
+			click(osk, 153, 190);			/* '3' */
+			if (strcmp(OSK_GetText(osk), extra[k].want))
+				ok = false;
+			OSK_Destroy(osk);
+		}
+		check(ok, "uk, it, es, nl layouts");
+	}
 
 	cfg.layout = OSK_LAYOUT_AZERTY;
 	osk = OSK_Create(&cfg);

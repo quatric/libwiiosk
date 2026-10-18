@@ -33,7 +33,11 @@ typedef enum {
 	OSK_LAYOUT_QWERTY = 0,	/* US English */
 	OSK_LAYOUT_QWERTZ,	/* German */
 	OSK_LAYOUT_AZERTY,	/* French */
-	OSK_LAYOUT_NUMPAD	/* digits, '.', ',', '-' */
+	OSK_LAYOUT_NUMPAD,	/* digits, '.', ',', '-' */
+	OSK_LAYOUT_QWERTY_UK,	/* since 2.1: UK English */
+	OSK_LAYOUT_QWERTY_IT,	/* Italian */
+	OSK_LAYOUT_QWERTY_ES,	/* Spanish */
+	OSK_LAYOUT_QWERTY_NL	/* Dutch */
 } osk_layout;
 
 enum {
@@ -53,13 +57,18 @@ enum {
 /* Word list for predictive text: an eZiText static dictionary (.zsd) and
    optionally an extra word list (.znd), both kept in memory by the app.
    The built-in dictionaries below are separate objects, so only the ones
-   an app references are linked (each adds 75-110 KB). */
+   an app references are linked (each adds 55-80 KB). They are stored
+   compressed (packed != NULL, zsd and znd NULL) and unpacked the first
+   time a keyboard uses them (80-115 KB each, kept until
+   OSK_FreeDictionaries()). */
 typedef struct {
 	const char *name;		/* UTF-8, shown on the prediction key */
 	const void *zsd;
 	size_t zsd_size;
 	const void *znd;		/* may be NULL */
 	size_t znd_size;
+	const void *packed;		/* built-in only: zsd + znd, compressed */
+	size_t packed_size;
 } osk_dictionary;
 
 extern const osk_dictionary osk_dict_en_us;	/* English (US) */
@@ -262,7 +271,7 @@ void OSK_Resume(osk_keyboard *osk);
 osk_status OSK_Prompt(const osk_config *cfg, GXRModeObj *rmode, void *xfb,
 		      char *out, size_t out_size);
 
-/* Optional sound effects (about 48 KB of compressed audio, linked only
+/* Optional sound effects (about 26 KB of compressed audio, linked only
    if one of these functions is used). OSK_InitSound() plays them through
    ASND (link -lasnd); pass true to have it call ASND_Init() as well.
    Each sound is decoded on first use (about 190 KB for all of them). */
@@ -287,10 +296,21 @@ bool OSK_GetSound(osk_sound sound, osk_sound_data *out);
    European ones elsewhere. Links no dictionary data. */
 osk_language OSK_SystemLanguage(void);
 /* The built-in dictionary for a language, NULL for OSK_LANG_NONE.
-   Using either of these links all nine dictionaries (about 950 KB);
+   Using either of these links all nine dictionaries (about 630 KB);
    to keep a few, switch on OSK_SystemLanguage() yourself. */
 const osk_dictionary *OSK_LanguageDictionary(osk_language lang);
 const osk_dictionary *OSK_SystemDictionary(void);	/* of OSK_SystemLanguage() */
+
+/* The system keyboard's letter layout for a language: US QWERTY for
+   en_us (and OSK_LANG_NONE), the UK, Italian, Spanish and Dutch QWERTY
+   layouts, German QWERTZ, French AZERTY (also for fr_ca). No data. */
+osk_layout OSK_LanguageLayout(osk_language lang);
+osk_layout OSK_SystemLayout(void);			/* of OSK_SystemLanguage() */
+
+/* Set cfg->layout (unless it is OSK_LAYOUT_NUMPAD) and cfg->dictionary
+   from the console language, like the system keyboard. Links all nine
+   dictionaries, as OSK_SystemDictionary() does. */
+void OSK_UseSystemLanguage(osk_config *cfg);
 
 /* Fill d from .zsd / .znd files loaded by the app (e.g. from SD); the
    buffers must stay valid while a keyboard uses them. znd may be NULL.
@@ -298,6 +318,10 @@ const osk_dictionary *OSK_SystemDictionary(void);	/* of OSK_SystemLanguage() */
 bool OSK_DictionaryFromMemory(osk_dictionary *d, const char *name,
 			      const void *zsd, size_t zsd_size,
 			      const void *znd, size_t znd_size);
+
+/* Release the unpacked built-in dictionaries. Destroy every keyboard
+   that uses one first. */
+void OSK_FreeDictionaries(void);
 
 /* Prediction state, toggled by the prediction key. */
 void OSK_SetPrediction(osk_keyboard *osk, bool on);

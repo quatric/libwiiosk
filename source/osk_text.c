@@ -13,37 +13,10 @@ osk_text.c -- proportional text metrics and text box layout
 const osk_font_size osk_text_font = { 32, 37, -1 };
 
 /* Unpack the glyph atlas (osk_font_atlas_w * osk_font_atlas_h / 2 bytes,
-   free() it when done). The format is described in tools/mkfont.py. */
+   free() it when done). */
 u8 *osk_font_unpack(void)
 {
-	unsigned size = osk_font_atlas_w * osk_font_atlas_h / 2, o = 0, bit = 0;
-	const u8 *in = osk_font_atlas_lz;
-	u8 *out = malloc(size), flags = 0;
-
-	if (!out)
-		return NULL;
-	while (o < size) {
-		if (bit == 0) {
-			flags = *in++;
-			bit = 0x80;
-		}
-		if (flags & bit) {
-			unsigned len = in[0] >> 4, dist = ((in[0] & 15) << 8 | in[1]) + 1;
-			if (len) {
-				len += 2;
-				in += 2;
-			} else {
-				len = in[2] + 18;
-				in += 3;
-			}
-			for (; len && o < size; len--, o++)
-				out[o] = out[o - dist];
-		} else {
-			out[o++] = *in++;
-		}
-		bit >>= 1;
-	}
-	return out;
+	return osk_unpack(osk_font_atlas_packed, osk_font_atlas_packed_size, NULL);
 }
 
 const osk_glyph *osk_find_glyph(uint32_t cp)

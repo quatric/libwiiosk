@@ -4,12 +4,16 @@
     python3 tools/mkfont.py path/to/FOT-RodinNTLGPro-DB.otf > source/osk_font_data.c
 
 Any TrueType/OpenType font works; the atlas header names the font it was
-rendered from. The 4-bit atlas is stored LZSS-compressed (see lzss() below
-and osk_font_unpack() in source/osk_text.c) and unpacked once at startup.
-Requires Pillow.
+rendered from. The 4-bit atlas is packed by tools/rcpack.py (its image
+model) and unpacked once at startup by osk_font_unpack() in
+source/osk_text.c. Requires Pillow.
 """
+import os
 import sys
 from PIL import Image, ImageDraw, ImageFont
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import rcpack
 
 EM = 31			# pixel size the atlas is rendered at: cap height just above
 			# the largest on-screen text, so glyphs are only ever scaled down
@@ -85,60 +89,17 @@ def main():
 			a = (px[xx, yy] * 15 + 127) // 255
 			b = (px[xx + 1, yy] * 15 + 127) // 255
 			data.append(a << 4 | b)
-	data = lzss(data)
-	out.write('/* LZSS-compressed 4-bit coverage, two texels per byte, left texel in the\n'
-		  '   high nibble (%d bytes unpacked) */\n' % (ATLAS_W * atlas_h // 2))
-	out.write('const u8 osk_font_atlas_lz[%d] = {\n' % len(data))
-	for i in range(0, len(data), 24):
-		out.write('\t' + ','.join('0x%02x' % v for v in data[i:i + 24]) + ',\n')
-	out.write('};\n\n')
+	packed = rcpack.pack(data, rcpack.MODEL_IMAGE, ATLAS_W)
+	out.write('/* 4-bit coverage, two texels per byte, left texel in the high nibble\n'
+		  '   (%d bytes unpacked), packed by tools/rcpack.py */\n' % (ATLAS_W * atlas_h // 2))
+	out.write(rcpack.c_array('osk_font_atlas_packed', packed) + '\n')
+	out.write('const unsigned osk_font_atlas_packed_size = sizeof(osk_font_atlas_packed);\n\n')
 	out.write('const osk_glyph osk_font_glyphs[%d] = {\n' % len(placed))
 	for p in placed:
 		cp, gx, gy, w, h, left, top, adv = p[:8]
 		out.write('\t{ 0x%04x, %3d, %3d, %2d, %2d, %3d, %3d, %4d },\n' % (cp, gx, gy, w, h, left, top, round(adv * 16)))
 	out.write('};\n')
 	out.write('const unsigned osk_font_nglyphs = %d;\n' % len(placed))
-
-
-def lzss(data):
-	"""Each flag byte (MSB first) says whether the next 8 items are a literal
-	byte (0) or a back-reference (1). A back-reference is two bytes,
-	LLLLDDDD DDDDDDDD: copy from distance D+1; length L+2 for L = 1..15, or
-	for L = 0 a third byte N gives length N+18."""
-	MAXLEN, WIN = 255 + 18, 4096
-	out, n, i = [], len(data), 0
-	heads = {}
-	while i < n:
-		flag_pos = len(out)
-		out.append(0)
-		for bit in range(8):
-			if i >= n:
-				break
-			best = dist = 0
-			for p in reversed(heads.get(bytes(data[i:i + 3]), [])[-256:]):
-				if i - p > WIN:
-					break
-				l = 0
-				while l < MAXLEN and i + l < n and data[p + l] == data[i + l]:
-					l += 1
-				if l > best:
-					best, dist = l, i - p
-					if l == MAXLEN:
-						break
-			take = best if best >= 3 else 1
-			for k in range(i, i + take):
-				heads.setdefault(bytes(data[k:k + 3]), []).append(k)
-			if take == 1:
-				out.append(data[i])
-			else:
-				out[flag_pos] |= 0x80 >> bit
-				d = dist - 1
-				if take <= 17:
-					out += [(take - 2) << 4 | d >> 8, d & 0xFF]
-				else:
-					out += [d >> 8, d & 0xFF, take - 18]
-			i += take
-	return out
 
 
 if __name__ == '__main__':

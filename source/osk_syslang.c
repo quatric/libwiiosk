@@ -1,5 +1,5 @@
 /*-------------------------------------------------------------
-osk_syslang.c -- the dictionary language of the console settings
+osk_syslang.c -- the language and layout of the console settings
 -------------------------------------------------------------*/
 #include "osk_internal.h"
 
@@ -32,6 +32,21 @@ osk_language osk_conf_language(int lang, int area, int region)
 	}
 }
 
+osk_layout OSK_LanguageLayout(osk_language lang)
+{
+	switch (lang) {
+	case OSK_LANG_EN_GB:	return OSK_LAYOUT_QWERTY_UK;
+	case OSK_LANG_DE:	return OSK_LAYOUT_QWERTZ;
+	case OSK_LANG_FR:
+	case OSK_LANG_FR_CA:	return OSK_LAYOUT_AZERTY;
+	case OSK_LANG_ES:
+	case OSK_LANG_ES_LA:	return OSK_LAYOUT_QWERTY_ES;
+	case OSK_LANG_IT:	return OSK_LAYOUT_QWERTY_IT;
+	case OSK_LANG_NL:	return OSK_LAYOUT_QWERTY_NL;
+	default:		return OSK_LAYOUT_QWERTY;
+	}
+}
+
 #ifdef GEKKO
 _Static_assert(LANG_ENGLISH == CONF_LANG_ENGLISH && LANG_GERMAN == CONF_LANG_GERMAN &&
 	       LANG_FRENCH == CONF_LANG_FRENCH && LANG_SPANISH == CONF_LANG_SPANISH &&
@@ -43,5 +58,10 @@ osk_language OSK_SystemLanguage(void)
 {
 	CONF_Init();
 	return osk_conf_language(CONF_GetLanguage(), CONF_GetArea(), CONF_GetRegion());
+}
+
+osk_layout OSK_SystemLayout(void)
+{
+	return OSK_LanguageLayout(OSK_SystemLanguage());
 }
 #endif

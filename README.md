@@ -6,11 +6,13 @@ On-screen software keyboard library for Wii homebrew, built on libogc / GX.
 
 - The look and feel of the Wii system keyboard: glass keys that grow under the pointer, a two-line
   text box with a pulsing caret, Quit / OK buttons and letters / numpad tabs in the toolbar
-- QWERTY (US), QWERTZ (German), AZERTY (French) and numeric keypad layouts
+- The system keyboard's letter layouts: US, UK, Italian, Spanish and Dutch QWERTY, German QWERTZ,
+  French AZERTY, plus a numeric keypad. `OSK_UseSystemLanguage()` picks the layout and dictionary
+  from the console language
 - A "More" page on every letter layout with accented Latin-1 letters, `€` and extra symbols
 - Predictive text in nine languages from the Wii keyboard's eZiText dictionaries, with a
   candidate bar like the system keyboard's; only the languages you reference are linked
-- The system keyboard's sound effects (19 sounds, 48 KB), played through ASND or handed to your
+- The system keyboard's sound effects (19 sounds, 26 KB), played through ASND or handed to your
   own mixer
 - Shift (one-shot), Caps Lock, caret movement, auto-repeat, max length, password mode, optional
   line breaks
@@ -18,7 +20,8 @@ On-screen software keyboard library for Wii homebrew, built on libogc / GX.
 - 4:3 and 16:9 (anamorphic) output, NTSC and PAL
 - UTF-8 in and out
 - No asset files: every texture is generated at startup, and the anti-aliased proportional font
-  (Rodin NTLG Pro DB, the Wii system font) is compiled in, LZSS-compressed to about 21 KB
+  (Rodin NTLG Pro DB, the Wii system font) is compiled in. All built-in data (font, dictionaries,
+  sounds) is stored compressed with a small context-modelling range coder and unpacked on first use
 - Two ways to use it:
   - Inside your own GX render loop with `OSK_Update()` and `OSK_Draw()`.
   - As a blocking `OSK_Prompt()` for console/framebuffer apps.
@@ -111,25 +114,29 @@ through up to 20 suggestions. Prediction never appears in password mode or on th
 
 | Dictionary         | Language                | Size   |
 |--------------------|-------------------------|--------|
-| `osk_dict_en_us`   | English (US)            | 86 KB  |
-| `osk_dict_en_gb`   | English (UK)            | 95 KB  |
-| `osk_dict_de`      | German                  | 108 KB |
-| `osk_dict_fr`      | French                  | 82 KB  |
-| `osk_dict_fr_ca`   | French (Canada)         | 79 KB  |
-| `osk_dict_es`      | Spanish                 | 114 KB |
-| `osk_dict_es_la`   | Spanish (Latin America) | 111 KB |
-| `osk_dict_it`      | Italian                 | 110 KB |
-| `osk_dict_nl`      | Dutch                   | 106 KB |
+| `osk_dict_en_us`   | English (US)            | 61 KB  |
+| `osk_dict_en_gb`   | English (UK)            | 67 KB  |
+| `osk_dict_de`      | German                  | 77 KB  |
+| `osk_dict_fr`      | French                  | 58 KB  |
+| `osk_dict_fr_ca`   | French (Canada)         | 56 KB  |
+| `osk_dict_es`      | Spanish                 | 79 KB  |
+| `osk_dict_es_la`   | Spanish (Latin America) | 78 KB  |
+| `osk_dict_it`      | Italian                 | 75 KB  |
+| `osk_dict_nl`      | Dutch                   | 78 KB  |
+
+Sizes are as linked; each dictionary is stored compressed and unpacked the first time a keyboard
+uses it, into 80–115 KB of heap that is kept until `OSK_FreeDictionaries()`.
 
 To follow the console's language like the system keyboard does:
 
 ```c
-cfg.dictionary = OSK_SystemDictionary();   /* NULL for Japanese, Chinese, Korean */
+OSK_UseSystemLanguage(&cfg);   /* sets cfg.layout and cfg.dictionary */
 ```
 
-The console language selects the dictionary. The USA, Brazil and Latin America areas get the
-American variants (`en_us`, `fr_ca`, `es_la`) and every other area the European ones. This links
-all nine dictionaries (about 950 KB). To ship only some, switch on `OSK_SystemLanguage()`, which
+The console language selects both the letter layout and the dictionary (the numpad stays the
+numpad). The USA, Brazil and Latin America areas get the American dictionaries (`en_us`, `fr_ca`,
+`es_la`) and every other area the European ones. Japanese, Chinese and Korean get US QWERTY
+without prediction. This links all nine dictionaries (about 630 KB). To ship only some, switch on `OSK_SystemLanguage()`, which
 links no dictionary data:
 
 ```c
@@ -140,7 +147,19 @@ default:          cfg.dictionary = &osk_dict_en_us; break;
 }
 ```
 
-`OSK_LanguageDictionary()` maps any `osk_language` to its dictionary.
+`OSK_SystemDictionary()` and `OSK_SystemLayout()` return just one of the two, and
+`OSK_LanguageDictionary()` and `OSK_LanguageLayout()` map any `osk_language`.
+
+| Language | Layout                                             | Dictionary         |
+|----------|----------------------------------------------------|--------------------|
+| English  | `OSK_LAYOUT_QWERTY` (US) or `OSK_LAYOUT_QWERTY_UK`  | `en_us` or `en_gb` |
+| German   | `OSK_LAYOUT_QWERTZ`                                | `de`               |
+| French   | `OSK_LAYOUT_AZERTY`                                | `fr` or `fr_ca`    |
+| Spanish  | `OSK_LAYOUT_QWERTY_ES`                             | `es` or `es_la`    |
+| Italian  | `OSK_LAYOUT_QWERTY_IT`                             | `it`               |
+| Dutch    | `OSK_LAYOUT_QWERTY_NL`                             | `nl`               |
+
+![UK, Italian, Spanish and Dutch with their dictionaries](docs/languages.png)
 
 Each dictionary is a separate object in `libwiiosk.a`, so only the ones you reference are linked.
 To use dictionary files instead, for example from SD, load an eZiText `.zsd` (and optionally a
@@ -179,7 +198,7 @@ variation in cents. The sound data is a separate object, so apps that use neithe
 link it. `tools/mksound.py` renders the sounds from the keyboard's sound archive
 (`wiiSoftwareKeyboardSound.brsar`). It interprets the sequences, samples the bank's DSP-ADPCM
 instruments with their envelopes, and stores each sound at the lowest rate that keeps its sound,
-as 4-bit IMA ADPCM.
+as 4-bit IMA ADPCM, then packs the result (26 KB).
 
 ## libinput-wii
 
@@ -249,6 +268,21 @@ at the right of the text box move the caret a line up or down.
 The keyboard accepts any character `OSK_CanDisplay()` reports. That covers printable ASCII,
 Latin-1, `Œ œ` and `€`. It does not include CJK.
 
+## Compression
+
+The font atlas, the dictionaries and the sounds are packed by `tools/rcpack.py`, an adaptive binary
+range coder like LZMA's with a context model per kind of data. The font uses neighbouring pixels,
+the sounds the previous ADPCM nibbles, and the dictionaries the structure of the eZiText word graph
+(node heads, character indexes and pointer bytes are modelled apart). `source/osk_unpack.c`
+decodes them. Unpacking needs up to 380 KB of temporary memory (for a dictionary), freed right
+after.
+
+| Data                 | Raw    | LZSS                 | Packed |
+|----------------------|--------|----------------------|--------|
+| Font atlas           | 62 KB  | 21 KB                | 14 KB  |
+| Sounds (IMA ADPCM)   | 47 KB  | 35 KB                | 26 KB  |
+| Dictionaries (all 9) | 889 KB | larger than raw      | 628 KB |
+
 ## Upgrading from 1.x
 
 - The keyboard now fills the screen and uses the Wii system keyboard layout. Pointer coordinates
@@ -292,6 +326,7 @@ tests/selftest              scripted self-test
 tools/mkfont.py             generates source/osk_font_data.c from the font
 tools/mkdict.py             generates source/dict/ from eZiText dictionaries
 tools/mksound.py            generates source/osk_sound_data.c from the keyboard's sound archive
+tools/rcpack.py             the compressor for all built-in data (source/osk_unpack.c decodes)
 tools/preview               desktop build: previews and self-test
 nintendo_sdk_original/      original SDK package (local reference only, git-ignored)
 ```

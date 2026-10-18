@@ -23,6 +23,7 @@ static const u16 ima_steps[89] = {
 static const s8 ima_index[8] = { -1, -1, -1, -1, 2, 4, 6, 8 };
 
 static s16 *decoded[OSK_SOUND_COUNT];
+static u8 *adpcm;			/* unpacked on first use, kept */
 
 /* buffers are 32 byte aligned and padded with silence, as ASND needs */
 static unsigned osk_sound_bytes(const osk_sound_clip *c)
@@ -32,7 +33,7 @@ static unsigned osk_sound_bytes(const osk_sound_clip *c)
 
 static s16 *decode(const osk_sound_clip *c)
 {
-	const u8 *in = &osk_sound_adpcm[c->offset];
+	const u8 *in = &adpcm[c->offset];
 	unsigned size = osk_sound_bytes(c), i;
 	int pred = (s16)(in[0] << 8 | in[1]), index = in[2];
 	s16 *out;
@@ -74,6 +75,10 @@ bool OSK_GetSound(osk_sound sound, osk_sound_data *out)
 	if ((unsigned)sound >= OSK_SOUND_COUNT || !out)
 		return false;
 	c = &osk_sound_clips[sound];
+	if (!adpcm)
+		adpcm = osk_unpack(osk_sound_packed, osk_sound_packed_size, NULL);
+	if (!adpcm)
+		return false;
 	if (!decoded[sound])
 		decoded[sound] = decode(c);
 	if (!decoded[sound])

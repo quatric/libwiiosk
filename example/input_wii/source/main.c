@@ -92,7 +92,7 @@ int main(int argc, char **argv)
 	cfg.title = "Type with anything";
 	cfg.screen_width = rmode->fbWidth;
 	cfg.screen_height = rmode->efbHeight;
-	cfg.dictionary = OSK_SystemDictionary();	/* follows the console language */
+	OSK_UseSystemLanguage(&cfg);	/* layout and dictionary of the console language */
 	if (CONF_GetAspectRatio() == CONF_ASPECT_16_9)
 		cfg.flags |= OSK_FLAG_WIDESCREEN;
 	osk = OSK_Create(&cfg);

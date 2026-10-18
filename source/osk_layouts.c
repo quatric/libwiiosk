@@ -42,6 +42,37 @@ static const letter_table table_azerty = { {
 		"\xC5\x93^\xC2\xA8" "{}\xC2\xA7\xE2\x82\xAC\xC2\xA3$",
 } };
 
+static const letter_table table_uk = { {
+	"1234567890-" "qwertyuiop" "asdfghjkl;" "zxcvbnm,.=" " \xC2\xA5\xE2\x82\xAC" "[]\\/'#",
+	"1234567890-" "QWERTYUIOP" "ASDFGHJKL;" "ZXCVBNM,.=" " \xC2\xA5\xE2\x82\xAC" "[]\\/'#",
+	"!\"\xC2\xA3$%^&*()_" "QWERTYUIOP" "ASDFGHJKL:" "ZXCVBNM<>+" " \xC2\xA6`" "{}|?@~",
+	"!\"\xC2\xA3$%^&*()_" "qwertyuiop" "asdfghjkl:" "zxcvbnm<>+" " \xC2\xA6`" "{}|?@~",
+} };
+
+static const letter_table table_it = { {
+	"1234567890'" "qwertyuiop" "asdfghjkl+" "zxcvbnm,.-"
+		"\xC3\xA0\xC3\xA8\xC3\xA9" "\xC3\xAC@#\xE2\x82\xAC\xC3\xB2\xC3\xB9",
+	"1234567890'" "QWERTYUIOP" "ASDFGHJKL+" "ZXCVBNM,.-"
+		"\xC3\x80\xC3\x88\xC3\x89" "\xC3\x8C@#\xE2\x82\xAC\xC3\x92\xC3\x99",
+	"!\"\xC2\xA3$%&/()=?" "QWERTYUIOP" "ASDFGHJKL*" "ZXCVBNM;:_" "^<>" "\xC2\xB0[]~\\|",
+	"!\"\xC2\xA3$%&/()=?" "qwertyuiop" "asdfghjkl*" "zxcvbnm;:_" "^<>" "\xC2\xB0[]~\\|",
+} };
+
+static const letter_table table_es = { {
+	"1234567890\xC2\xA1" "qwertyuiop" "asdfghjkl\xC3\xB1" "zxcvbnm,.-" " \xC2\xB7\xC3\xA7" "()@\xC2\xB4`+",
+	"1234567890\xC2\xA1" "QWERTYUIOP" "ASDFGHJKL\xC3\x91" "ZXCVBNM\xC2\xBA\xC2\xAA_"
+		" \xC2\xAB\xC2\xBB" "<>\xE2\x82\xAC#\\'",
+	"!\"$%&/{}=?\xC2\xBF" "QWERTYUIOP" "ASDFGHJKL\xC3\x91" "ZXCVBNM;:_" " |\xC3\x87" "[]~\xC2\xA8^*",
+	"!\"$%&/{}=?\xC2\xBF" "qwertyuiop" "asdfghjkl\xC3\xB1" "zxcvbnm;:_" " |\xC3\x87" "[]~\xC2\xA8^*",
+} };
+
+static const letter_table table_nl = { {
+	"1234567890-" "qwertyuiop" "asdfghjkl:" "zxcvbnm,./" "  `" "[]\\'=\xE2\x82\xAC",
+	"1234567890-" "QWERTYUIOP" "ASDFGHJKL:" "ZXCVBNM,./" "  `" "[]\\'=\xE2\x82\xAC",
+	"!@#$%^&*()_" "QWERTYUIOP" "ASDFGHJKL;" "ZXCVBNM<>?" "  ~" "{}|\"+\xE2\x82\xAC",
+	"!@#$%^&*()_" "qwertyuiop" "asdfghjkl;" "zxcvbnm<>?" "  ~" "{}|\"+\xE2\x82\xAC",
+} };
+
 /* "More" page, shared by all letter layouts and filled into the visible
    slots in reading order: accented letters and extra symbols. The last
    three characters are only used by layouts with 50 slots. */
@@ -183,9 +214,13 @@ void osk_build_keys(osk_keyboard *osk)
 		build_numpad(osk);
 	} else {
 		switch (osk->letters) {
-		case OSK_LAYOUT_QWERTZ:	build_letters(osk, &table_qwertz); break;
-		case OSK_LAYOUT_AZERTY:	build_letters(osk, &table_azerty); break;
-		default:		build_letters(osk, &table_qwerty); break;
+		case OSK_LAYOUT_QWERTZ:		build_letters(osk, &table_qwertz); break;
+		case OSK_LAYOUT_AZERTY:		build_letters(osk, &table_azerty); break;
+		case OSK_LAYOUT_QWERTY_UK:	build_letters(osk, &table_uk); break;
+		case OSK_LAYOUT_QWERTY_IT:	build_letters(osk, &table_it); break;
+		case OSK_LAYOUT_QWERTY_ES:	build_letters(osk, &table_es); break;
+		case OSK_LAYOUT_QWERTY_NL:	build_letters(osk, &table_nl); break;
+		default:			build_letters(osk, &table_qwerty); break;
 		}
 	}
 

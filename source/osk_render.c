@@ -434,7 +434,7 @@ static void draw_key(osk_keyboard *osk, int idx)
 		text_centered(&st, label, k->cx + 2, k->cy);
 		break;
 	case KEY_PREDICT: {
-		/* book icon on the left, the language name in a 117 px box */
+		/* book icon on the left, the language name in the rest */
 		float w;
 
 		if (latched)
@@ -443,9 +443,9 @@ static void draw_key(osk_keyboard *osk, int idx)
 			pic_c(OSK_TEX_BOOK_CLOSED, k->cx - 56, k->cy, 32, 28, with_alpha(grey(40), 0), c_white);
 		st = (text_style){ { 22, 26, 0 }, rgb(46, 46, 174), rgb(42, 42, 154) };
 		w = osk_utf8_width(label, &st.fs);
-		if (w > 117)
-			st.fs.sx *= 117 / w;
-		text_centered(&st, label, k->cx + 25, k->cy);
+		if (w > 104)
+			st.fs.sx *= 104 / w;
+		text_centered(&st, label, k->cx + 27, k->cy);
 		break;
 	}
 	case KEY_CANDIDATE: {

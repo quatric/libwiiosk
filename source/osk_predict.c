@@ -24,6 +24,7 @@ UTF-16BE strings.
 All reads are bounds checked and every walk has a step budget, so a
 damaged file loaded from SD cannot hang or crash the keyboard.
 -------------------------------------------------------------*/
+#include <stdlib.h>
 #include <string.h>
 
 #include "osk_internal.h"
@@ -160,15 +161,67 @@ static u32 next_sibling(walker *w, u32 o)
 /*-------------------------------------------------------------
   dictionaries
 -------------------------------------------------------------*/
+/* unpacked built-in dictionaries */
+#define MAX_UNPACKED	16
+
+static struct {
+	const osk_dictionary *dict;
+	u8 *data;
+} unpacked[MAX_UNPACKED];
+
+static const u8 *unpack_dict(const osk_dictionary *d)
+{
+	u32 size;
+	u8 *data;
+	int i, free_slot = -1;
+
+	for (i = 0; i < MAX_UNPACKED; i++) {
+		if (unpacked[i].dict == d)
+			return unpacked[i].data;
+		if (!unpacked[i].dict && free_slot < 0)
+			free_slot = i;
+	}
+	if (free_slot < 0)
+		return NULL;
+	data = osk_unpack(d->packed, d->packed_size, &size);
+	if (data && size != d->zsd_size + d->znd_size) {
+		free(data);
+		data = NULL;
+	}
+	if (data) {
+		unpacked[free_slot].dict = d;
+		unpacked[free_slot].data = data;
+	}
+	return data;
+}
+
+void OSK_FreeDictionaries(void)
+{
+	int i;
+
+	for (i = 0; i < MAX_UNPACKED; i++) {
+		free(unpacked[i].data);
+		unpacked[i].dict = NULL;
+		unpacked[i].data = NULL;
+	}
+}
+
 bool osk_dict_parse(osk_predictor *p, const osk_dictionary *d)
 {
-	const u8 *z;
+	const u8 *z, *znd;
 	u32 base, off0, size0, off4, cnt4, region, o, i;
 
 	memset(p, 0, sizeof(*p));
-	if (!d || !d->zsd || d->zsd_size < 34 || d->zsd_size > 0xFFFFFF)
+	if (!d)
 		return false;
 	z = d->zsd;
+	znd = d->znd;
+	if (d->packed) {
+		z = unpack_dict(d);
+		znd = z && d->znd_size ? z + d->zsd_size : NULL;
+	}
+	if (!z || d->zsd_size < 34 || d->zsd_size > 0xFFFFFF)
+		return false;
 	base = be24(z, 7);
 	if (base < 34 || base > d->zsd_size)
 		return false;
@@ -195,10 +248,10 @@ bool osk_dict_parse(osk_predictor *p, const osk_dictionary *d)
 	p->block = off4;
 	p->nblock = i;
 
-	if (d->znd && d->znd_size >= 4) {
-		u32 n = be32(d->znd, 0);
+	if (znd && d->znd_size >= 4) {
+		u32 n = be32(znd, 0);
 		if (n <= (d->znd_size - 4) / 4) {
-			p->znd = d->znd;
+			p->znd = znd;
 			p->znd_size = d->znd_size;
 			p->nznd = n;
 		}
@@ -219,6 +272,8 @@ bool OSK_DictionaryFromMemory(osk_dictionary *d, const char *name,
 	d->zsd_size = zsd_size;
 	d->znd = znd;
 	d->znd_size = znd ? znd_size : 0;
+	d->packed = NULL;
+	d->packed_size = 0;
 	return osk_dict_parse(&p, d);
 }
 
