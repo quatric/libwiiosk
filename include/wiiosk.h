@@ -17,12 +17,12 @@ extern "C" {
 #endif
 
 #define WIIOSK_VERSION_MAJOR	2
-#define WIIOSK_VERSION_MINOR	1
+#define WIIOSK_VERSION_MINOR	2
 #define WIIOSK_VERSION_PATCH	0
-#define WIIOSK_VERSION_STRING	"2.1.0"
+#define WIIOSK_VERSION_STRING	"2.2.0"
 
 /* Hard upper bound for the number of characters (code points) in the buffer. */
-#define OSK_MAX_CHARS		256
+#define OSK_MAX_CHARS		2048
 
 typedef struct osk_keyboard osk_keyboard;
 

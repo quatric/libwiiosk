@@ -14,7 +14,7 @@ On-screen software keyboard library for Wii homebrew, built on libogc / GX.
   candidate bar like the system keyboard's; only the languages you reference are linked
 - The system keyboard's sound effects (19 sounds, 26 KB), played through ASND or handed to your
   own mixer
-- Shift (one-shot), Caps Lock, caret movement, auto-repeat, max length, password mode, optional
+- Shift (one-shot), Caps Lock, caret movement, auto-repeat, max length (up to 2048 characters), password mode, optional
   line breaks
 - Input from the Wii Remote pointer and buttons, the Classic Controller, the GameCube controller and USB keyboards
 - 4:3 and 16:9 (anamorphic) output, NTSC and PAL
