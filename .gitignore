@@ -1,0 +1,8 @@
+build/
+lib/
+*.elf
+*.dol
+*.map
+.DS_Store
+# Proprietary SDK material kept only as local reference; never distribute.
+nintendo_sdk_original/
