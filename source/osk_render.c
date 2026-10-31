@@ -169,13 +169,14 @@ static void draw_background(osk_keyboard *osk)
 {
 	osk_color panel = from_u32(osk->theme.panel);
 	osk_color black = mix(with_alpha(c_clear, 255), panel, 246 / 255.0f);
-	float x0 = -ox, x1 = osk->vw - ox;
+	float x0 = -ox, x1 = osk->vw - ox, y;
 	osk_color bar0 = { 255, 255, 255, 32 }, bar1 = { 255, 255, 255, 160 };
 
 	black.a = 255;
-	/* soft stripes: an 8 texel stripe pattern stretched over (14,6) 612x464 */
-	quad(OSK_TEX_STRIPES, x0, 0, x1, OSK_DESIGN_H,
-	     0, (0 - 6) / 464.0f, 1, (OSK_DESIGN_H - 6) / 464.0f, black, panel, NULL);
+	/* fine stripes: the 8 texel stripe pattern repeated 24 times over
+	   (14,6) 612x464, one quad per repeat */
+	for (y = 6 - 464.0f / 24; y < OSK_DESIGN_H; y += 464.0f / 24)
+		quad(OSK_TEX_STRIPES, x0, y, x1, y + 464.0f / 24, 0, 0, 1, 1, black, panel, NULL);
 
 	/* toolbar: light blue wash from y=130, darker blue band from y=394 */
 	band(x0, x1, 130, OSK_DESIGN_H, 130, bar0, 472, bar1, rgb(0, 182, 255));
@@ -208,10 +209,11 @@ static void window(osk_tex tex, float c, float x, float y, float w, float h,
 static void round_box(float x0, float y0, float x1, float y1, osk_color c)
 {
 	float r = (y1 - y0) / 2;
+	osk_color rim = with_alpha(c, 0);	/* the texture's dark rim takes the fill color */
 
-	quad(OSK_TEX_ROUND, x0, y0, x0 + r, y1, 0, 0, 0.5f, 1, c_clear, c, NULL);
-	quad(OSK_TEX_ROUND, x0 + r, y0, x1 - r, y1, 0.5f, 0, 0.5f, 1, c_clear, c, NULL);
-	quad(OSK_TEX_ROUND, x1 - r, y0, x1, y1, 0.5f, 0, 1, 1, c_clear, c, NULL);
+	quad(OSK_TEX_ROUND, x0, y0, x0 + r, y1, 0, 0, 0.5f, 1, rim, c, NULL);
+	quad(OSK_TEX_ROUND, x0 + r, y0, x1 - r, y1, 0.5f, 0, 0.5f, 1, rim, c, NULL);
+	quad(OSK_TEX_ROUND, x1 - r, y0, x1, y1, 0.5f, 0, 1, 1, rim, c, NULL);
 }
 
 /* white window between the text box and the keys, with a plate
@@ -262,10 +264,10 @@ static void draw_textbox(osk_keyboard *osk)
 
 	/* scroll arrows while the text is longer than the box */
 	if (osk->scroll > 0)
-		pic(OSK_TEX_ARROW, 546, 46, 38, 30, with_alpha(grey_arrow, 0), grey_arrow);
+		pic(OSK_TEX_ARROW, 546, 46, 38, 30, with_alpha(grey_arrow, 0), c_white);
 	if (osk->scroll + OSK_TEXT_LINES < n)
 		quad(OSK_TEX_ARROW, 546.17f, 84.92f, 584.17f, 114.92f, 0, 1, 1, 0,
-		     with_alpha(grey_arrow, 0), grey_arrow, NULL);
+		     with_alpha(grey_arrow, 0), c_white, NULL);
 }
 
 /*-------------------------------------------------------------
@@ -420,6 +422,14 @@ static void draw_key(osk_keyboard *osk, int idx)
 		break;
 	case KEY_SHIFT:
 	case KEY_CAPS:
+		/* the French, German, Italian and Spanish keyboards show an
+		   arrow instead of the words */
+		if (osk->letters == OSK_LAYOUT_AZERTY || osk->letters == OSK_LAYOUT_QWERTZ ||
+		    osk->letters == OSK_LAYOUT_QWERTY_IT || osk->letters == OSK_LAYOUT_QWERTY_ES) {
+			pic_c(OSK_TEX_ICON_SHIFT, k->cx, k->cy, k->kind == KEY_SHIFT ? 52 : 48, 28,
+			      with_alpha(grey(128), 0), grey(128));
+			break;
+		}
 		st = (text_style){ { 24, 22, 1 }, grey(64), grey(64) };
 		text_centered(&st, label, k->cx, k->cy);
 		break;

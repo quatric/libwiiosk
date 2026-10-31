@@ -19,7 +19,8 @@ On-screen software keyboard library for Wii homebrew, built on libogc / GX.
 - Input from the Wii Remote pointer and buttons, the Classic Controller, the GameCube controller and USB keyboards
 - 4:3 and 16:9 (anamorphic) output, NTSC and PAL
 - UTF-8 in and out
-- No asset files: every texture is generated at startup, and the anti-aliased proportional font
+- No asset files: the system keyboard's own textures are compiled in (packed 4-bit, about 40 KB),
+  or drawn procedurally with `make TEXTURES=generated`, and the anti-aliased proportional font
   (Rodin NTLG Pro DB, the Wii system font) is compiled in. All built-in data (font, dictionaries,
   sounds) is stored compressed with a small context-modelling range coder and unpacked on first use
 - Two ways to use it:
@@ -35,6 +36,7 @@ make                 # lib/libwiiosk.a
 make install         # copies header + lib to $DEVKITPRO/portlibs/wii
 make example         # example/gx/wiiosk_gx.dol, example/console/wiiosk_console.dol
 make -C tests/selftest
+make TEXTURES=generated   # draw every texture procedurally instead of using the system keyboard's
 ```
 
 Link with `-lwiiosk -lwiiuse -lbte -logc -lm`. Add `-lwiikeyboard` only if you call
@@ -326,6 +328,7 @@ tests/selftest              scripted self-test
 tools/mkfont.py             generates source/osk_font_data.c from the font
 tools/mkdict.py             generates source/dict/ from eZiText dictionaries
 tools/mksound.py            generates source/osk_sound_data.c from the keyboard's sound archive
+tools/mktex.py              generates source/osk_tex_data.c from the keyboard's textures
 tools/rcpack.py             the compressor for all built-in data (source/osk_unpack.c decodes)
 tools/preview               desktop build: previews and self-test
 nintendo_sdk_original/      original SDK package (local reference only, git-ignored)
@@ -336,8 +339,7 @@ nintendo_sdk_original/      original SDK package (local reference only, git-igno
 This folder used to hold Nintendo's 2009 *Software Keyboard* SDK sample, which is NintendoWare/RVL
 SDK code. That material is kept in `nintendo_sdk_original/` only for local reference and must not be
 redistributed. wiiosk is a separate, original implementation that uses only libogc. The look is
-modelled on the Wii system keyboard and recreated with procedurally generated graphics; no Nintendo
-code, layouts or textures are included.
+modelled on the Wii system keyboard; no Nintendo code or layouts are included.
 
 The dictionaries in `source/dict/` are not original work. They are the eZiText word lists by Zi
 Corporation that ship with the Wii keyboard (`eZTSystem*.zsd`, `eZTNintendo*.znd`), as published
@@ -348,6 +350,10 @@ leave `cfg.dictionary` unset (then nothing of them is linked) or load your own d
 The sound effects in `source/osk_sound_data.c` are not original work either. They are rendered
 from Nintendo's `wiiSoftwareKeyboardSound.brsar` (the archive itself is not included) and are not
 covered by the zlib license. They are linked only if you call `OSK_InitSound()` or `OSK_GetSound()`.
+
+The textures in `source/osk_tex_data.c` are not original work. They are converted from the SDK's
+`softKeyboard_external` TGA files by `tools/mktex.py` and are not covered by the zlib license. Build
+with `make TEXTURES=generated` to leave them out; every texture is then drawn by `source/osk_gfx.c`.
 
 The font is FOT-Rodin NTLG Pro DB by Fontworks, the typeface used by the Wii system menu. It is a
 commercial font and is not included; `source/osk_font_data.c` holds glyph bitmaps rendered from it by

@@ -1,8 +1,11 @@
 /*-------------------------------------------------------------
-osk_gfx.c -- textures generated at start-up
+osk_gfx.c -- the textures, made at start-up
 
-Every image is drawn from rounded rectangles, polygons and
-vertical gradients described below; no bitmaps are stored.
+By default they are the system keyboard's own textures, unpacked
+from osk_tex_data.c (tools/mktex.py). Built with
+OSK_GENERATED_TEXTURES, every image is instead drawn from rounded
+rectangles, polygons and vertical gradients described below, and no
+bitmaps are stored. The pointer is always drawn.
 Grey images are later tinted by the material colors of the quad
 that uses them (see osk_backend_quad()).
 -------------------------------------------------------------*/
@@ -374,8 +377,29 @@ static void gen_icon_enter(osk_image *im)
 	}
 }
 
-/* text box scroll arrow: rounded square outline around an up arrow,
-   used as a mask */
+/* Shift / Caps: white up arrow with a dark outline */
+static void gen_icon_shift(osk_image *im)
+{
+	static const float outline[] = {
+		28, 1, 53, 18, 40, 18, 40, 30, 16, 30, 16, 18, 3, 18,
+	};
+	static const float arrow[] = {
+		28, 4.5f, 46.5f, 16, 37.5f, 16, 37.5f, 27.5f, 18.5f, 27.5f, 18.5f, 16, 9.5f, 16,
+	};
+	int x, y;
+
+	for (y = 0; y < im->h; y++) {
+		for (x = 0; x < im->w; x++) {
+			float a = poly(outline, 7, x, y);
+			float v = 255 * poly(arrow, 7, x, y);
+
+			put(im, x, y, v, v, v, a);
+		}
+	}
+}
+
+/* text box scroll arrow: white rounded square with a dark outline
+   around a dark up arrow */
 static void gen_arrow(osk_image *im)
 {
 	static const float shape[] = {
@@ -386,9 +410,10 @@ static void gen_arrow(osk_image *im)
 	for (y = 0; y < im->h; y++) {
 		for (x = 0; x < im->w; x++) {
 			float px = x + 0.5f, py = y + 0.5f;
-			float ring = rrect(px, py, 0, 0, 48, 48, 8) - rrect(px, py, 3, 3, 45, 45, 6);
+			float a = rrect(px, py, 0, 0, 48, 48, 8);
+			float ring = a - rrect(px, py, 3, 3, 45, 45, 6);
 			float v = fmaxf(clampf(ring, 0, 1), poly(shape, 4, x, y));
-			put_i(im, x, y, 255 * v);
+			put(im, x, y, 255 * (1 - v), 255 * (1 - v), 255 * (1 - v), a);
 		}
 	}
 }
@@ -561,6 +586,7 @@ static const struct {
 	[OSK_TEX_ICON_NUMPAD]	= {  64, 32, gen_icon_numpad },
 	[OSK_TEX_ICON_BACK]	= {  56, 32, gen_icon_back },
 	[OSK_TEX_ICON_ENTER]	= {  56, 48, gen_icon_enter },
+	[OSK_TEX_ICON_SHIFT]	= {  56, 32, gen_icon_shift },
 	[OSK_TEX_ARROW]		= {  48, 48, gen_arrow },
 	[OSK_TEX_FRAME_THICK]	= {  16, 16, gen_frame_thick },
 	[OSK_TEX_FRAME_THIN]	= {   8,  8, gen_frame_thin },
@@ -571,18 +597,77 @@ static const struct {
 	[OSK_TEX_ROUND]		= {  32, 32, gen_round },
 };
 
+#ifndef OSK_GENERATED_TEXTURES
+/* rebuild an image from its 4-bit planes, see tools/mktex.py */
+static void from_planes(osk_image *im, const osk_tex_source *src, const u8 *planes)
+{
+	unsigned x, y, i;
+
+	for (y = 0; y < src->h; y++) {
+		for (x = 0; x < src->w; x++) {
+			u8 v[8], *p = &im->rgba[(y * im->w + x) * 4];
+			unsigned n = src->fmt == OSK_TEXFMT_I4 ? 1 : src->fmt == OSK_TEXFMT_IA4 ? 2 :
+				     src->fmt == OSK_TEXFMT_IA8 ? 4 : 8;
+
+			for (i = 0; i < n; i++) {
+				unsigned at = (src->row + i * src->h + y) * osk_tex_plane_w + x;
+				u8 b = planes[at / 2];
+				v[i] = (at & 1) ? b & 15 : b >> 4;
+			}
+			switch (src->fmt) {
+			case OSK_TEXFMT_I4:
+				p[0] = p[1] = p[2] = p[3] = v[0] * 17;
+				break;
+			case OSK_TEXFMT_IA4:
+				p[0] = p[1] = p[2] = v[0] * 17;
+				p[3] = v[1] * 17;
+				break;
+			case OSK_TEXFMT_IA8:
+				p[0] = p[1] = p[2] = v[0] << 4 | v[1];
+				p[3] = v[2] << 4 | v[3];
+				break;
+			default:
+				for (i = 0; i < 4; i++)
+					p[i] = v[2 * i] << 4 | v[2 * i + 1];
+				break;
+			}
+		}
+	}
+}
+#endif
+
 bool osk_gfx_generate(osk_image images[OSK_TEX_IMAGES])
 {
+	u8 *planes = NULL;
 	int i;
 
 	memset(images, 0, sizeof(osk_image) * OSK_TEX_IMAGES);
+#ifndef OSK_GENERATED_TEXTURES
+	planes = osk_unpack(osk_tex_packed, osk_tex_packed_size, NULL);
+	if (!planes)
+		return false;
+#endif
 	for (i = 0; i < OSK_TEX_IMAGES; i++) {
-		if (!alloc_image(&images[i], image_defs[i].w, image_defs[i].h)) {
+		const osk_tex_source *src = NULL;
+
+#ifndef OSK_GENERATED_TEXTURES
+		if (osk_tex_sources[i].fmt != OSK_TEXFMT_NONE)
+			src = &osk_tex_sources[i];
+#endif
+		if (!alloc_image(&images[i], src ? src->w : image_defs[i].w, src ? src->h : image_defs[i].h)) {
+			free(planes);
 			osk_gfx_free(images);
 			return false;
 		}
+#ifndef OSK_GENERATED_TEXTURES
+		if (src) {
+			from_planes(&images[i], src, planes);
+			continue;
+		}
+#endif
 		image_defs[i].gen(&images[i]);
 	}
+	free(planes);
 	return true;
 }
 
