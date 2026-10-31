@@ -274,7 +274,9 @@ osk_status OSK_Prompt(const osk_config *cfg, GXRModeObj *rmode, void *xfb,
 /* Optional sound effects (about 26 KB of compressed audio, linked only
    if one of these functions is used). OSK_InitSound() plays them through
    ASND (link -lasnd); pass true to have it call ASND_Init() as well.
-   Each sound is decoded on first use (about 190 KB for all of them). */
+   Each sound is decoded on first use. OSK_InitSound() keeps it upsampled
+   to ASND's 48 kHz mix rate (about 510 KB for all of them), OSK_GetSound()
+   at its native rate (about 190 KB). */
 bool OSK_InitSound(bool init_asnd);
 void OSK_ShutdownSound(void);
 void OSK_SetSoundVolume(u8 volume);		/* 0..255, default 255 */

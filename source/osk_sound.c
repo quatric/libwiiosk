@@ -68,24 +68,39 @@ static s16 *decode(const osk_sound_clip *c)
 	return out;
 }
 
-bool OSK_GetSound(osk_sound sound, osk_sound_data *out)
+bool osk_sound_load(osk_sound sound, osk_sound_data *out, bool *owned)
 {
 	const osk_sound_clip *c;
+	s16 *pcm;
 
 	if ((unsigned)sound >= OSK_SOUND_COUNT || !out)
 		return false;
 	c = &osk_sound_clips[sound];
-	if (!adpcm)
-		adpcm = osk_unpack(osk_sound_packed, osk_sound_packed_size, NULL);
-	if (!adpcm)
-		return false;
-	if (!decoded[sound])
-		decoded[sound] = decode(c);
-	if (!decoded[sound])
-		return false;
-	out->pcm = decoded[sound];
+	*owned = !decoded[sound];
+	if (decoded[sound]) {
+		pcm = decoded[sound];
+	} else {
+		if (!adpcm)
+			adpcm = osk_unpack(osk_sound_packed, osk_sound_packed_size, NULL);
+		if (!adpcm)
+			return false;
+		pcm = decode(c);
+		if (!pcm)
+			return false;
+	}
+	out->pcm = pcm;
 	out->samples = c->samples;
 	out->rate = c->rate;
 	out->jitter_cents = c->jitter_cents;
+	return true;
+}
+
+bool OSK_GetSound(osk_sound sound, osk_sound_data *out)
+{
+	bool owned;
+
+	if (!osk_sound_load(sound, out, &owned))
+		return false;
+	decoded[sound] = (s16 *)out->pcm;
 	return true;
 }

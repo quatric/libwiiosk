@@ -151,6 +151,10 @@ typedef struct {
 extern const u8 osk_sound_packed[];		/* IMA ADPCM, packed */
 extern const unsigned osk_sound_packed_size;
 extern const osk_sound_clip osk_sound_clips[OSK_SOUND_COUNT];
+/* osk_sound.c: like OSK_GetSound(), but out->pcm is a new buffer that the
+   caller frees (or the cached one if OSK_GetSound() already made it;
+   *owned tells which) */
+bool osk_sound_load(osk_sound sound, osk_sound_data *out, bool *owned);
 
 /* osk_predict.c */
 bool osk_dict_parse(osk_predictor *p, const osk_dictionary *d);

@@ -192,7 +192,9 @@ OSK_InitSound(true);    /* true: also call ASND_Init(); link -lasnd */
 After this, every keyboard plays the system keyboard's sound effects: focus ticks, typing,
 delete, refusals, caret moves, Shift, More, the tabs, prediction, opening, OK and Cancel. Typing,
 delete and choosing a word vary their pitch slightly, like the original. `OSK_SetSoundVolume()`
-sets the ASND voice volume. The sounds are decoded on first use.
+sets the ASND voice volume. The sounds are decoded on first use and upsampled to ASND's 48 kHz mix
+rate with a cubic spline, because ASND resamples without interpolation and would make the short
+32 kHz clicks gritty (about 510 KB if every sound is played).
 
 Apps with their own mixer set `cfg.on_sound` instead (it replaces the ASND playback) and fetch
 the samples with `OSK_GetSound()`. Those are mono s16 at 10.7, 16 or 32 kHz, with the pitch
