@@ -141,6 +141,10 @@ struct osk_keyboard {
 					   caret - 1), -1 if none */
 	unsigned tap_index;		/* its place in the key's sequence */
 	unsigned tap_frames;		/* frames since the last tap */
+	u8 t9_keys[OSK_CAND_LEN];	/* T9: the keys of the word being typed */
+	unsigned t9_len;		/* 0: no word being typed */
+	unsigned t9_start, t9_shown;	/* where it is in the text, its length */
+	bool t9_upper;			/* PHONE_ABC: it starts with a capital */
 	bool symbols;			/* symbol window open */
 	unsigned symbol_page;
 	unsigned symbol_anim;		/* frames since it opened or closed */
@@ -209,6 +213,10 @@ bool osk_predict_active(const osk_keyboard *osk);
 /* recompute the candidates if the word before the caret changed; true
    if they did */
 bool osk_predict_update(osk_keyboard *osk, bool force);
+/* T9 word input on the keypad while prediction is on */
+bool osk_t9_active(const osk_keyboard *osk);
+/* candidates for osk->t9_keys, words of that length first */
+void osk_t9_search(osk_keyboard *osk);
 bool osk_is_word_char(uint32_t cp);
 
 /* osk_syslang.c: CONF_GetLanguage(), CONF_GetArea() (negative if

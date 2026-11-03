@@ -199,6 +199,20 @@ int main(int argc, char **argv)
 	shoot(osk, "symbols_greek");
 	OSK_Destroy(osk);
 
+	/* T9: "Hello " then 4 6 6 3 being typed, the candidates above */
+	dictionary = &osk_dict_en_us;
+	osk = make(OSK_LAYOUT_QWERTY, 0, NULL, "Hello ");
+	press(osk, 352, 424);
+	press(osk, 211, 252);
+	press(osk, 443, 252);
+	press(osk, 443, 252);
+	press(osk, 443, 199);
+	point(osk, 443, 199, 10);
+	osk->frame = 11;
+	shoot(osk, "phone_t9");
+	OSK_Destroy(osk);
+	dictionary = NULL;
+
 	osk = make(OSK_LAYOUT_NUMPAD, 0, NULL, "3.14159");
 	frames(osk, 11, 0);
 	shoot(osk, "numpad");

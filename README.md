@@ -117,7 +117,8 @@ forms (`resume` → `résumé`), but an accented letter only matches itself. Poi
 A, or press Up from the top key row and use the D-pad. The arrows at the right of the bar page
 through up to 20 suggestions. Prediction never appears in password mode, in the
 keypad's 123 mode or in the symbol window. On the cellphone keypad the prediction key shows the
-dictionary's short name (`EN`, `Eng`, `DE`, ...) and switches prediction on and off.
+dictionary's short name (`EN`, `Eng`, `DE`, ...) and switches between T9 word input and
+multi-tap.
 
 | Dictionary         | Language                | Size   |
 |--------------------|-------------------------|--------|
@@ -263,6 +264,13 @@ The 0 key gives a space, then 0. The tags at the left switch between Abc (a capi
 of a sentence), abc, ABC and 123; Shift steps through the letter modes. The `More` / `€éα` key
 opens the symbol window: ← / → turn its ten pages, choosing a symbol types it and leaves the window
 open, and Close, HOME or the More page button (Classic Y, GameCube Z) close it.
+
+With a dictionary and prediction on, the letter keys spell words instead (T9): each key adds
+one letter, the text shows the dictionary's first word for the keys so far in red, and the bar
+offers the others and longer words. The 1 key stands for punctuation and the apostrophe (`3 6 6 1
+8` → `don't`). The space key (then labelled `␣` only) ends the word with a space, B or ← drops
+the last key, and any other key ends the word as it is shown. Choosing a candidate replaces it
+and adds a space.
 
 `OSK_LAYOUT_NUMPAD` opens the keypad in 123 mode. With `OSK_FLAG_LOCK_LAYOUT` it is a keypad of
 digits, `-`, `.` and `,` only, without tags or symbols.

@@ -265,8 +265,10 @@ static void draw_textbox(osk_keyboard *osk)
 
 			if (cp == '\n')
 				continue;
-			/* the multi-tap letter still being chosen */
-			if (osk->tap_slot >= 0 && i + 1 == osk->caret) {
+			/* the multi-tap letter still being chosen, the T9 word
+			   being typed */
+			if ((osk->tap_slot >= 0 && i + 1 == osk->caret) ||
+			    (osk->t9_len && i >= osk->t9_start && i < osk->t9_start + osk->t9_shown)) {
 				pending.top = pending.bottom = cp == 0x2423 ? rgb(255, 20, 20) : rgb(200, 50, 50);
 				x += glyph(&pending, cp, x, top);
 			} else {

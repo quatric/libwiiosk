@@ -311,7 +311,8 @@ void osk_phone_label(const osk_keyboard *osk, unsigned slot, char out[32])
 	if (osk->numeric || osk->mode == PHONE_DIGITS || slot > 8) {
 		uint32_t c[16];
 		if (slot == 10 && !osk->numeric && osk->mode != PHONE_DIGITS) {
-			strcpy(out, "\xE2\x90\xA3" "0");	/* open box, 0 */
+			/* open box, and 0 unless T9 makes the key a space */
+			strcpy(out, osk_t9_active(osk) ? "\xE2\x90\xA3" : "\xE2\x90\xA3" "0");
 			return;
 		}
 		if (osk_phone_chars(osk, slot, c) == 1)

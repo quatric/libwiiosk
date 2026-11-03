@@ -188,9 +188,25 @@ static bool insert_char(osk_keyboard *osk, uint32_t cp)
 	return true;
 }
 
+static void t9_show(osk_keyboard *osk);
+
 static void backspace(osk_keyboard *osk)
 {
 	osk->tap_slot = -1;		/* a pending letter is simply removed */
+	/* T9: drop the last key of the word being typed */
+	if (osk->t9_len && osk->caret == osk->t9_start + osk->t9_shown) {
+		if (--osk->t9_len) {
+			t9_show(osk);
+		} else {
+			memmove(&osk->text[osk->t9_start], &osk->text[osk->caret],
+				(osk->len - osk->caret) * sizeof(uint32_t));
+			osk->len -= osk->t9_shown;
+			osk->caret = osk->t9_start;
+			osk->utf8_dirty = true;
+		}
+		sound(osk, OSK_SOUND_DELETE);
+		return;
+	}
 	if (!osk->caret) {
 		reject(osk);
 		return;
@@ -309,12 +325,13 @@ static void phone_case(osk_keyboard *osk, bool confirmed)
 		osk->phone_upper = false;
 }
 
-/* confirm the pending multi-tap letter */
+/* confirm the pending multi-tap letter or the T9 word */
 static void phone_commit(osk_keyboard *osk)
 {
-	if (osk->tap_slot < 0)
+	if (osk->tap_slot < 0 && !osk->t9_len)
 		return;
 	osk->tap_slot = -1;
+	osk->t9_len = 0;
 	phone_case(osk, true);
 }
 
@@ -330,13 +347,90 @@ static unsigned phone_accepted(const osk_keyboard *osk, unsigned slot, uint32_t 
 	return m;
 }
 
+static void rebuild_bar(osk_keyboard *osk);
+
+/* T9: show the word for the typed keys, the start of the first candidate,
+   or else the word so far and the first letter of the last key */
+static void t9_show(osk_keyboard *osk)
+{
+	uint32_t word[OSK_CAND_LEN], seq[16];
+	unsigned start = osk->t9_start, old = osk->t9_shown, n = osk->t9_len;
+
+	osk_t9_search(osk);
+	if (osk->ncand) {
+		memcpy(word, osk->cand[0].cp, n * sizeof(uint32_t));
+	} else {
+		if (old < n)
+			n = old;
+		memcpy(word, &osk->text[start], n * sizeof(uint32_t));
+		if (n < osk->t9_len && phone_accepted(osk, osk->t9_keys[n], seq)) {
+			uint32_t c = osk_lower(seq[0]);
+			if (osk->mode == PHONE_UPPER || (osk->mode == PHONE_ABC && osk->t9_upper && !n))
+				c = osk_upper(c);
+			word[n++] = c;
+		}
+	}
+	memmove(&osk->text[start + n], &osk->text[start + old],
+		(osk->len - start - old) * sizeof(uint32_t));
+	memcpy(&osk->text[start], word, n * sizeof(uint32_t));
+	osk->len = osk->len - old + n;
+	osk->caret = start + n;
+	osk->t9_shown = n;
+	osk->utf8_dirty = true;
+	/* a candidate replaces the word as it is shown */
+	osk->word_start = start;
+	osk->word_len = n;
+	memcpy(osk->word, word, n * sizeof(uint32_t));
+	rebuild_bar(osk);
+}
+
+/* T9: a letter key adds to the word being typed */
+static void t9_key(osk_keyboard *osk, unsigned slot)
+{
+	if (osk->t9_len && osk->caret != osk->t9_start + osk->t9_shown)
+		phone_commit(osk);
+	if (osk->t9_len >= OSK_CAND_LEN ||
+	    osk->len - osk->t9_shown + osk->t9_len + 1 > osk->max_chars) {
+		reject(osk);
+		return;
+	}
+	if (!osk->t9_len) {
+		phone_commit(osk);
+		osk->t9_start = osk->caret;
+		osk->t9_shown = 0;
+		osk->t9_upper = osk->phone_upper;
+	}
+	osk->t9_keys[osk->t9_len++] = slot;
+	t9_show(osk);
+	if (osk->t9_shown < osk->t9_len) {
+		/* no letter of the key is accepted */
+		if (!--osk->t9_len)
+			phone_commit(osk);
+		reject(osk);
+		return;
+	}
+	sound(osk, OSK_SOUND_INPUT);
+}
+
 /* A first tap types the key's first character as a pending letter, the
    next taps replace it by the following ones (B: the previous ones);
-   keys with a single character type it directly. */
+   keys with a single character type it directly. With prediction on, the
+   letter keys spell words (T9) and 0 is a space. */
 static void phone_tap(osk_keyboard *osk, unsigned slot, bool reverse)
 {
 	uint32_t seq[16];
-	unsigned n = phone_accepted(osk, slot, seq);
+	unsigned n;
+
+	if (osk_t9_active(osk) && slot <= 8) {
+		t9_key(osk, slot);
+		return;
+	}
+	if (osk_t9_active(osk) && slot == 10) {
+		phone_commit(osk);
+		insert_char(osk, ' ');
+		return;
+	}
+	n = phone_accepted(osk, slot, seq);
 
 	if (osk->tap_slot == (int)slot && osk->caret) {
 		if (n > 1) {
@@ -766,6 +860,7 @@ static bool pointer_textbox(osk_keyboard *osk)
 
 	if (!pointer_in(osk, 39, 30.33f, 556, 100))
 		return false;
+	phone_commit(osk);
 
 	n = osk_wrap_text(osk, start);
 	if (n > OSK_TEXT_LINES && pointer_in(osk, 546, 46, 38, 30)) {
@@ -859,6 +954,7 @@ osk_keyboard *OSK_Create(const osk_config *cfg)
 	osk->mode = osk->phone ? PHONE_DIGITS : PHONE_ABC;
 	osk->phone_upper = true;
 	osk->tap_slot = -1;
+	osk->t9_len = 0;
 	osk->symbol_anim = OSK_SYMBOL_OPEN_FRAMES;
 	osk->symbol_slide = OSK_SYMBOL_SLIDE_FRAMES;
 	osk->letters = osk->phone ? OSK_LAYOUT_QWERTY : cfg->layout;
@@ -901,6 +997,7 @@ void OSK_SetText(osk_keyboard *osk, const char *utf8)
 	osk->scroll = 0;
 	osk->utf8_dirty = true;
 	osk->tap_slot = -1;
+	osk->t9_len = 0;
 	osk->phone_upper = sentence_start(osk);
 	ensure_caret_visible(osk);
 	refresh_prediction(osk, true);
@@ -1027,7 +1124,8 @@ osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 
 	/* B on a keypad key steps back through its characters instead of
 	   erasing */
-	if (((in->down | in->held) & OSK_BTN_REVERSE) && focus_is(osk, KEY_PHONE)) {
+	if (((in->down | in->held) & OSK_BTN_REVERSE) && focus_is(osk, KEY_PHONE) &&
+	    !osk_t9_active(osk)) {
 		fire &= ~OSK_BTN_BACKSPACE;
 		if (in->down & OSK_BTN_REVERSE) {
 			osk->keys[osk->focus].push = 0;

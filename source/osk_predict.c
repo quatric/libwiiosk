@@ -325,7 +325,21 @@ typedef struct {
 	unsigned room;			/* code points that may replace the word */
 	unsigned limit;			/* stop at this many candidates */
 	bool strict;			/* no accent folding */
+	const uint32_t (*keys)[17];	/* T9: each place's letters, 0-ended */
 } search;
+
+/* does dictionary letter c fit the typed letter (or key) at place i */
+static bool fits(const search *s, unsigned i, uint32_t c)
+{
+	if (s->keys) {
+		const uint32_t *k = s->keys[i];
+		for (; *k; k++)
+			if (*k == c || *k == fold(c))
+				return true;
+		return false;
+	}
+	return s->strict ? osk_lower(s->typed[i]) == c : matches(s->typed[i], c);
+}
 
 static bool blocked(const osk_predictor *p, const uint32_t *w, unsigned n)
 {
@@ -404,7 +418,7 @@ static void walk(search *s, walker *w, bool exact)
 			continue;
 		}
 		c = be16(p->zsd, p->charset + ci * 2);
-		if (d < s->n && (s->strict ? osk_lower(s->typed[d]) != c : !matches(s->typed[d], c))) {
+		if (d < s->n && !fits(s, d, c)) {
 			node[d] = next_sibling(w, o);
 			continue;
 		}
@@ -441,7 +455,7 @@ static void extra(search *s, bool exact)
 		}
 		if (n > OSK_CAND_LEN || n < s->n || (exact && n != s->n))
 			continue;
-		for (j = 0; j < s->n && matches(s->typed[j], word[j]); j++)
+		for (j = 0; j < s->n && fits(s, j, word[j]); j++)
 			;
 		if (j == s->n && !add(s, word, n))
 			return;
@@ -461,11 +475,47 @@ bool osk_predict_active(const osk_keyboard *osk)
 	       !(osk->cfg.flags & OSK_FLAG_PASSWORD);
 }
 
+bool osk_t9_active(const osk_keyboard *osk)
+{
+	return osk->phone && osk_predict_active(osk);
+}
+
+void osk_t9_search(osk_keyboard *osk)
+{
+	uint32_t keys[OSK_CAND_LEN][17];
+	search s = { 0 };
+	unsigned i, j, n;
+
+	for (i = 0; i < osk->t9_len; i++) {
+		n = osk_phone_chars(osk, osk->t9_keys[i], keys[i]);
+		for (j = 0; j < n; j++)
+			keys[i][j] = osk_lower(keys[i][j]);
+		keys[i][n] = 0;
+	}
+	s.osk = osk;
+	s.keys = (const uint32_t (*)[17])keys;
+	s.n = osk->t9_len;
+	s.caps_all = osk->mode == PHONE_UPPER;
+	s.caps_first = osk->mode == PHONE_ABC && osk->t9_upper;
+	s.room = osk->max_chars - (osk->len - osk->t9_shown);
+	s.limit = OSK_MAX_CANDIDATES;
+
+	osk->ncand = 0;
+	osk->cand_first = 0;
+	walk_all(&s, true);
+	extra(&s, true);
+	walk_all(&s, false);
+	extra(&s, false);
+}
+
 bool osk_predict_update(osk_keyboard *osk, bool force)
 {
 	unsigned start = osk->caret, n, i, letters = 0, upper_count = 0;
 	const uint32_t *typed;
 	search s;
+
+	if (osk->t9_len)
+		return false;		/* osk_t9_search() made them */
 
 	while (start > 0 && osk_is_word_char(osk->text[start - 1]))
 		start--;
@@ -477,7 +527,7 @@ bool osk_predict_update(osk_keyboard *osk, bool force)
 		if (is_upper(typed[i]))
 			upper_count++;
 	}
-	if (!osk_predict_active(osk) || !letters || n > OSK_CAND_LEN ||
+	if (!osk_predict_active(osk) || osk_t9_active(osk) || !letters || n > OSK_CAND_LEN ||
 	    (osk->caret < osk->len && osk_is_word_char(osk->text[osk->caret])))
 		n = 0;
 
@@ -492,6 +542,7 @@ bool osk_predict_update(osk_keyboard *osk, bool force)
 	if (!n)
 		return true;
 
+	s.keys = NULL;
 	s.osk = osk;
 	s.typed = osk->word;
 	s.n = n;

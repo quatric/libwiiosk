@@ -368,6 +368,49 @@ static bool text_is(osk_keyboard *osk, const char *want)
 	return !strcmp(OSK_GetText(osk), want);
 }
 
+/* T9 on the keypad while prediction is on */
+static void t9_tests(void)
+{
+	static const int hello[] = { 3, 2, 4, 4, 5 };	/* 4 3 5 5 6 */
+	static const int home[] = { 3, 5, 5, 2 };	/* 4 6 6 3 */
+	osk_config cfg;
+	osk_keyboard *osk;
+	unsigned i;
+
+	OSK_DefaultConfig(&cfg);
+	cfg.dictionary = &osk_dict_en_us;
+	cfg.on_event = on_event;
+	osk = OSK_Create(&cfg);
+	click(osk, 352, 424);				/* cellphone tab */
+	for (i = 0; i < 5; i++)
+		tap(osk, hello[i]);
+	check(text_is(osk, "Hello") && has_candidate(osk, "Hello"), "t9 word");
+	tap(osk, 10);
+	check(text_is(osk, "Hello ") && OSK_GetCandidateCount(osk) == 0, "t9 space");
+	for (i = 0; i < 4; i++)
+		tap(osk, home[i]);
+	check(OSK_GetLength(osk) == 10 && has_candidate(osk, "home") && has_candidate(osk, "good"),
+	      "t9 candidates");
+	for (i = 0; i < OSK_GetCandidateCount(osk) && !candidate_is(osk, i, "home"); i++)
+		;
+	OSK_ChooseCandidate(osk, i);
+	check(text_is(osk, "Hello home "), "t9 choose");
+	tap(osk, 1);
+	tap(osk, 1);
+	step(osk, OSK_BTN_BACKSPACE, 0);
+	check(OSK_GetLength(osk) == 12 && OSK_GetCandidateCount(osk) > 0, "t9 backspace a key");
+	step(osk, OSK_BTN_BACKSPACE, 0);
+	check(text_is(osk, "Hello home "), "t9 backspace the word");
+	/* the 1 key spells apostrophes */
+	tap(osk, 2);					/* 3 6 6 1 8: don't */
+	tap(osk, 5);
+	tap(osk, 5);
+	tap(osk, 0);
+	tap(osk, 7);
+	check(has_candidate(osk, "don't"), "t9 punctuation key");
+	OSK_Destroy(osk);
+}
+
 static void phone_tests(void)
 {
 	osk_config cfg;
@@ -624,6 +667,7 @@ void run_tests(void)
 	OSK_Destroy(osk);
 
 	phone_tests();
+	t9_tests();
 
 	cfg.flags = OSK_FLAG_LOCK_LAYOUT;
 	osk = OSK_Create(&cfg);
