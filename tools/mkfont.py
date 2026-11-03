@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Generate source/osk_font_data.c, the anti-aliased glyph atlas used by wiiosk.
 
-    python3 tools/mkfont.py path/to/FOT-RodinNTLGPro-DB.otf > source/osk_font_data.c
+    python3 tools/mkfont.py path/to/FOT-RodinNTLGPro-DB.otf [fallback] > source/osk_font_data.c
 
 Any TrueType/OpenType font works; the atlas header names the font it was
-rendered from. The 4-bit atlas is packed by tools/rcpack.py (its image
+rendered from. Glyphs the font lacks are taken from the optional fallback
+font (a path, or path:index for a collection), e.g.
+/System/Library/Fonts/Helvetica.ttc:1 for the three that Rodin NTLG has
+not got (final sigma, the Greek tonos and the open box for a space). The
+4-bit atlas is packed by tools/rcpack.py (its image
 model) and unpacked once at startup by osk_font_unpack() in
 source/osk_text.c. Requires Pillow.
 """
@@ -21,11 +25,33 @@ SS = 4			# supersampling factor
 PAD = 2			# empty texels around every glyph (bilinear filtering)
 ATLAS_W = 512
 
-CODEPOINTS = list(range(0x20, 0x7F)) + list(range(0xA0, 0x100)) + [0x152, 0x153, 0x20AC]
+# Latin-1, the OE ligatures and the euro sign, plus what the cellphone
+# keypad's symbol pages hold: Y diaeresis, Greek, quotation marks, arrows,
+# music and geometric signs, and the open box shown for a pending space
+CODEPOINTS = (list(range(0x20, 0x7F)) + list(range(0xA0, 0x100)) + [0x152, 0x153, 0x178] +
+	      [0x37E] + list(range(0x384, 0x38B)) + [0x38C] + list(range(0x38E, 0x3A2)) +
+	      list(range(0x3A3, 0x3CF)) +
+	      [0x2018, 0x2019, 0x201C, 0x201D, 0x201E, 0x20AC, 0x2122, 0x2190, 0x2191, 0x2192,
+	       0x2193, 0x221E, 0x2423, 0x25A1, 0x25B3, 0x25C7, 0x25CB, 0x25CE, 0x2606, 0x266A,
+	       0x266D])
+
+
+def load(spec):
+	path, sep, index = spec.rpartition(':')
+	if not sep or not index.isdigit():
+		path, index = spec, '0'
+	return ImageFont.truetype(path, EM * SS, index=int(index))
+
+
+def has_glyph(font, ch):
+	"""PIL draws missing glyphs as .notdef; compare with a code point no
+	font maps"""
+	return bytes(font.getmask(ch)) != bytes(font.getmask('\U0010FFFF'))
 
 
 def main():
-	font = ImageFont.truetype(sys.argv[1], EM * SS)
+	font = load(sys.argv[1])
+	fallback = load(sys.argv[2]) if len(sys.argv) > 2 else None
 	name = ' '.join(font.getname())
 	ascent, descent = font.getmetrics()
 	hb = font.getmask('H').getbbox()
@@ -34,11 +60,16 @@ def main():
 	glyphs = []
 	for cp in CODEPOINTS:
 		ch = chr(cp)
-		adv = font.getlength(ch) / SS
+		f = font
+		if cp > 0xFF and not has_glyph(font, ch):
+			if not fallback or not has_glyph(fallback, ch):
+				sys.exit('U+%04X is missing from the font and the fallback' % cp)
+			f = fallback
+		adv = f.getlength(ch) / SS
 		# getbbox() is not tight, so measure the rendered ink instead
 		size = EM * SS * 3
 		big = Image.new('L', (size, size), 0)
-		ImageDraw.Draw(big).text((EM * SS, EM * SS * 2), ch, font=font, fill=255, anchor='ls')
+		ImageDraw.Draw(big).text((EM * SS, EM * SS * 2), ch, font=f, fill=255, anchor='ls')
 		ink = big.getbbox()
 		if cp in (0x20, 0xA0) or not ink:
 			glyphs.append((cp, None, 0, 0, adv))

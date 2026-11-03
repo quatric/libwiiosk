@@ -354,6 +354,145 @@ static void prediction_tests(void)
 	OSK_Destroy(osk);
 }
 
+/* cellphone keypad: grid key centers, slots in reading order */
+#define PX(s)	(211 + 116 * ((s) % 3))
+#define PY(s)	(199 + 53 * ((s) / 3))
+
+static void tap(osk_keyboard *osk, int slot)
+{
+	click(osk, PX(slot), PY(slot));
+}
+
+static bool text_is(osk_keyboard *osk, const char *want)
+{
+	return !strcmp(OSK_GetText(osk), want);
+}
+
+static void phone_tests(void)
+{
+	osk_config cfg;
+	osk_keyboard *osk;
+	int i;
+
+	OSK_DefaultConfig(&cfg);
+	cfg.on_event = on_event;
+	osk = OSK_Create(&cfg);
+	click(osk, 352, 424);				/* cellphone tab */
+
+	/* Abc: a capital to start with, small letters after it */
+	tap(osk, 1);
+	tap(osk, 1);
+	check(text_is(osk, "B"), "multi-tap cycles");
+	tap(osk, 2);					/* another key confirms */
+	check(text_is(osk, "Bd"), "multi-tap confirm, then small letters");
+	tap(osk, 2);
+	tap(osk, 2);
+	tap(osk, 2);
+	tap(osk, 2);					/* d e f 3, then d again */
+	check(text_is(osk, "Bd"), "multi-tap wraps");
+	for (i = 0; i < 90; i++)
+		point(osk, PX(2), PY(2), 0);
+	tap(osk, 2);
+	check(text_is(osk, "Bdd"), "multi-tap timeout");
+	step(osk, OSK_BTN_BACKSPACE, 0);
+	check(text_is(osk, "Bd"), "backspace removes the pending letter");
+
+	/* B on a key steps backwards: '9' first, and no erasing */
+	point(osk, PX(8), PY(8), 0);
+	point(osk, PX(8), PY(8), OSK_BTN_BACKSPACE | OSK_BTN_REVERSE);
+	check(text_is(osk, "Bd9"), "reverse tap");
+	point(osk, PX(8), PY(8), OSK_BTN_BACKSPACE | OSK_BTN_REVERSE);
+	check(text_is(osk, "Bdz"), "reverse cycle");
+
+	/* space key: space, then 0; a sentence end brings the capital back */
+	tap(osk, 0);					/* '.' */
+	tap(osk, 10);
+	tap(osk, 4);
+	check(text_is(osk, "Bdz. J"), "capital after a sentence");
+	tap(osk, 10);
+	tap(osk, 10);
+	check(text_is(osk, "Bdz. J0"), "space key cycles to 0");
+
+	/* ABC, abc and 123 tags */
+	click(osk, 40, 305);				/* ABC */
+	tap(osk, 3);
+	tap(osk, 5);
+	click(osk, 40, 252);				/* abc */
+	tap(osk, 3);
+	click(osk, 40, 358);				/* 123 */
+	tap(osk, 3);
+	tap(osk, 3);
+	tap(osk, 10);
+	check(text_is(osk, "Bdz. J0GMg440"), "mode tags");
+	OSK_Destroy(osk);
+
+	/* the German keypad, OK confirms a pending letter */
+	cfg.layout = OSK_LAYOUT_QWERTZ;
+	osk = OSK_Create(&cfg);
+	click(osk, 352, 424);
+	click(osk, 40, 252);				/* abc */
+	for (i = 0; i < 5; i++)
+		tap(osk, 6);				/* p q r s sharp s */
+	check(step(osk, OSK_BTN_CONFIRM, 0) == OSK_STATUS_DONE && text_is(osk, "\xC3\x9F"), "german keypad");
+	OSK_Destroy(osk);
+
+	/* a filter leaves one character on the key: typed directly; a key
+	   with none is refused */
+	cfg.layout = OSK_LAYOUT_QWERTY;
+	cfg.filter = digits_only;
+	osk = OSK_Create(&cfg);
+	click(osk, 352, 424);
+	tap(osk, 1);
+	tap(osk, 1);
+	rejects = 0;
+	tap(osk, 10);
+	check(text_is(osk, "220") && !rejects, "filtered keypad");
+	cfg.filter = NULL;
+	OSK_Destroy(osk);
+
+	/* the full buffer refuses a new letter but lets the pending one cycle */
+	cfg.max_chars = 1;
+	osk = OSK_Create(&cfg);
+	click(osk, 352, 424);
+	tap(osk, 1);
+	tap(osk, 1);
+	rejects = 0;
+	tap(osk, 2);
+	check(text_is(osk, "B") && rejects == 1, "keypad max length");
+	cfg.max_chars = 0;
+	OSK_Destroy(osk);
+
+	/* symbol window: a symbol of the first and the second page, then
+	   close; HOME closes it instead of cancelling */
+	osk = OSK_Create(&cfg);
+	click(osk, 352, 424);
+	click(osk, 443, 358);				/* More */
+	click(osk, 105, 197);				/* '.' */
+	click(osk, 213, 408);				/* next page */
+	click(osk, 105, 197);				/* '[' */
+	click(osk, 480, 408);				/* Close */
+	tap(osk, 1);
+	check(text_is(osk, ".[a"), "symbol window");
+	step(osk, OSK_BTN_ALT, 0);
+	check(step(osk, OSK_BTN_CANCEL, 0) == OSK_STATUS_EDITING, "home closes the symbol window");
+	tap(osk, 1);					/* the keypad again */
+	check(text_is(osk, ".[aa"), "symbol window closed");
+	OSK_Destroy(osk);
+
+	/* a locked numpad holds numbers only */
+	cfg.layout = OSK_LAYOUT_NUMPAD;
+	cfg.flags = OSK_FLAG_LOCK_LAYOUT;
+	osk = OSK_Create(&cfg);
+	tap(osk, 0);
+	tap(osk, 9);
+	tap(osk, 11);
+	click(osk, 584, 305);				/* ',' */
+	tap(osk, 10);
+	click(osk, 40, 358);				/* no tags */
+	check(text_is(osk, "1-.,0"), "numbers only");
+	OSK_Destroy(osk);
+}
+
 void run_tests(void)
 {
 	osk_config cfg;
@@ -476,12 +615,15 @@ void run_tests(void)
 	/* --- layout tabs --- */
 	OSK_DefaultConfig(&cfg);
 	osk = OSK_Create(&cfg);
-	click(osk, 352, 424);				/* numpad tab */
-	click(osk, 262, 252);				/* '5' */
+	click(osk, 352, 424);				/* cellphone tab */
+	click(osk, 40, 358);				/* 123 */
+	click(osk, 327, 252);				/* '5' */
 	click(osk, 287, 424);				/* letters tab */
 	click(osk, 153, 260);				/* 'a' */
 	check(!strcmp(OSK_GetText(osk), "5a"), "layout tabs");
 	OSK_Destroy(osk);
+
+	phone_tests();
 
 	cfg.flags = OSK_FLAG_LOCK_LAYOUT;
 	osk = OSK_Create(&cfg);

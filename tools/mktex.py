@@ -46,6 +46,8 @@ TEXTURES = [
 	# the candidate bar turns the scroll arrow by 90 degrees to point left
 	("OSK_TEX_SCROLL", "common/fs_scrollAllow_a", "IA4", Image.Transpose.ROTATE_90),
 	("OSK_TEX_ROUND", "common/fs_roundPlate_a", "IA4", None),
+	("OSK_TEX_WINDOW_PLATE", "common/fs_windowPlate_a", "IA8", None),
+	("OSK_TEX_FADE_BAR", "common/fs_gradationBar_a", "IA4", None),
 ]
 
 # planes per format: channel, shift (4 = high nibble, 0 = low nibble)

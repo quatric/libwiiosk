@@ -2,13 +2,16 @@
 
 On-screen software keyboard library for Wii homebrew, built on libogc / GX.
 
-![QWERTY with word prediction, the More page, AZERTY and the numpad](docs/layouts.png)
+![QWERTY with word prediction, the More page, AZERTY and the cellphone keypad](docs/layouts.png)
 
 - The look and feel of the Wii system keyboard: glass keys that grow under the pointer, a two-line
-  text box with a pulsing caret, Quit / OK buttons and letters / numpad tabs in the toolbar
+  text box with a pulsing caret, Quit / OK buttons and QWERTY / cellphone tabs in the toolbar
 - The system keyboard's letter layouts: US, UK, Italian, Spanish and Dutch QWERTY, German QWERTZ,
-  French AZERTY, plus a numeric keypad. `OSK_UseSystemLanguage()` picks the layout and dictionary
-  from the console language
+  French AZERTY. `OSK_UseSystemLanguage()` picks the layout and dictionary from the console
+  language
+- The system keyboard's cellphone keypad: multi-tap letters in the layout's language, Abc / abc /
+  ABC / 123 mode tags, sentence capitals, and a symbol window with ten pages of punctuation,
+  arrows, Greek and other symbols
 - A "More" page on every letter layout with accented Latin-1 letters, `€` and extra symbols
 - Predictive text in nine languages from the Wii keyboard's eZiText dictionaries, with a
   candidate bar like the system keyboard's; only the languages you reference are linked
@@ -112,7 +115,9 @@ letters before the caret. Choosing one replaces the word and adds a space. Sugge
 typed capitalisation (`Th` → `The`, `HEL` → `HELLO`). A base letter also matches its accented
 forms (`resume` → `résumé`), but an accented letter only matches itself. Point at a word and press
 A, or press Up from the top key row and use the D-pad. The arrows at the right of the bar page
-through up to 20 suggestions. Prediction never appears in password mode or on the numpad.
+through up to 20 suggestions. Prediction never appears in password mode, in the
+keypad's 123 mode or in the symbol window. On the cellphone keypad the prediction key shows the
+dictionary's short name (`EN`, `Eng`, `DE`, ...) and switches prediction on and off.
 
 | Dictionary         | Language                | Size   |
 |--------------------|-------------------------|--------|
@@ -135,8 +140,7 @@ To follow the console's language like the system keyboard does:
 OSK_UseSystemLanguage(&cfg);   /* sets cfg.layout and cfg.dictionary */
 ```
 
-The console language selects both the letter layout and the dictionary (the numpad stays the
-numpad). The USA, Brazil and Latin America areas get the American dictionaries (`en_us`, `fr_ca`,
+The console language selects the letter layout, the keypad's letters and the dictionary. The USA, Brazil and Latin America areas get the American dictionaries (`en_us`, `fr_ca`,
 `es_la`) and every other area the European ones. Japanese, Chinese and Korean get US QWERTY
 without prediction. This links all nine dictionaries (about 630 KB). To ship only some, switch on `OSK_SystemLanguage()`, which
 links no dictionary data:
@@ -238,15 +242,30 @@ loop; build it with `make -C example/input_wii LIBINPUT_WII=/path/to/libinput-wi
 | Press key     | A (point or D-pad) | A | A          | (type)        |
 | Move focus    | D-pad      | D-pad   | D-pad / stick |               |
 | Erase         | B          | B       | B             | Backspace / Delete |
+| Keypad: previous letter | B | B     | B             |               |
 | Move caret    | 1 / 2      | L / R   | L / R         | ← → Home End  |
-| Shift         | −          | −       | Y             | (keyboard's own) |
-| More page     |            | Y       | Z             |               |
+| Shift / keypad mode | −    | −       | Y             | (keyboard's own) |
+| More page / symbols |      | Y       | Z             |               |
 | Space         |            | X       | X             | Space         |
 | OK            | +          | +       | Start         | Enter (line break with `OSK_FLAG_MULTILINE`) |
 | Cancel        | HOME       | HOME    | (Quit button) | Esc           |
 
 To move the caret with the pointer, point into the text box and press A. The arrows that appear
 at the right of the text box move the caret a line up or down.
+
+## Cellphone keypad
+
+The toolbar's second tab (or `OSK_LAYOUT_NUMPAD`) shows the keypad of the system keyboard. Press a
+key repeatedly to step through its letters; the pending letter is drawn red and is confirmed by
+another key, by moving away, or after 1.5 seconds (90 frames). B steps back to the previous letter
+of the pending key instead of erasing (the input sends `OSK_BTN_BACKSPACE | OSK_BTN_REVERSE`).
+The 0 key gives a space, then 0. The tags at the left switch between Abc (a capital at the start
+of a sentence), abc, ABC and 123; Shift steps through the letter modes. The `More` / `€éα` key
+opens the symbol window: ← / → turn its ten pages, choosing a symbol types it and leaves the window
+open, and Close, HOME or the More page button (Classic Y, GameCube Z) close it.
+
+`OSK_LAYOUT_NUMPAD` opens the keypad in 123 mode. With `OSK_FLAG_LOCK_LAYOUT` it is a keypad of
+digits, `-`, `.` and `,` only, without tags or symbols.
 
 ## Options
 
@@ -265,12 +284,13 @@ at the right of the text box move the caret a line up or down.
   - `OSK_FLAG_GX_READY`
   - `OSK_FLAG_MULTILINE`: Enter inserts `\n` instead of confirming
   - `OSK_FLAG_NO_ENTER`: hide the Enter key
-  - `OSK_FLAG_LOCK_LAYOUT`: hide the letters / numpad tabs
+  - `OSK_FLAG_LOCK_LAYOUT`: hide the QWERTY / cellphone tabs
   - `OSK_FLAG_PREDICT_OFF`: start with word prediction switched off
   - `OSK_FLAG_NO_HINTS`: no effect since 2.0
 
 The keyboard accepts any character `OSK_CanDisplay()` reports. That covers printable ASCII,
-Latin-1, `Œ œ` and `€`. It does not include CJK.
+Latin-1, `Œ œ Ÿ`, `€`, Greek, typographic quotes, `™`, arrows and the keypad's symbols
+(`∞ □ △ ◇ ○ ◎ ☆ ♪ ♭`). It does not include CJK.
 
 ## Compression
 
@@ -283,9 +303,16 @@ after.
 
 | Data                 | Raw    | LZSS                 | Packed |
 |----------------------|--------|----------------------|--------|
-| Font atlas           | 62 KB  | 21 KB                | 14 KB  |
+| Font atlas           | 96 KB  | 35 KB                | 20 KB  |
 | Sounds (IMA ADPCM)   | 47 KB  | 35 KB                | 26 KB  |
 | Dictionaries (all 9) | 889 KB | larger than raw      | 628 KB |
+
+## Upgrading from 2.2
+
+- The second toolbar tab is the cellphone keypad instead of the numpad, and `OSK_LAYOUT_NUMPAD`
+  opens it in 123 mode. Use `OSK_FLAG_LOCK_LAYOUT` for the old digits-only pad.
+- Custom input code that wants B to step back through keypad letters should add
+  `OSK_BTN_REVERSE` to `OSK_BTN_BACKSPACE`; without it B erases as before.
 
 ## Upgrading from 1.x
 
@@ -359,4 +386,6 @@ with `make TEXTURES=generated` to leave them out; every texture is then drawn by
 
 The font is FOT-Rodin NTLG Pro DB by Fontworks, the typeface used by the Wii system menu. It is a
 commercial font and is not included; `source/osk_font_data.c` holds glyph bitmaps rendered from it by
-`tools/mkfont.py`. To build with a different font, pass its TTF/OTF to `tools/mkfont.py`.
+`tools/mkfont.py`. To build with a different font, pass its TTF/OTF to `tools/mkfont.py`; an
+optional second font (`path[:index]`) supplies glyphs the first lacks. The shipped atlas was made
+with `tools/mkfont.py FOT-RodinNTLGPro-DB.otf /System/Library/Fonts/Helvetica.ttc:1`.

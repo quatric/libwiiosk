@@ -42,6 +42,24 @@ bool OSK_CanDisplay(uint32_t cp)
 	return cp >= 0x20 && osk_find_glyph(cp) != NULL;
 }
 
+uint32_t osk_lower(uint32_t c)
+{
+	if ((c >= 'A' && c <= 'Z') || (c >= 0xC0 && c <= 0xDE && c != 0xD7))
+		return c + 32;
+	if (c == 0x152)
+		return 0x153;
+	return c;
+}
+
+uint32_t osk_upper(uint32_t c)
+{
+	if ((c >= 'a' && c <= 'z') || (c >= 0xE0 && c <= 0xFE && c != 0xF7))
+		return c - 32;
+	if (c == 0x153)
+		return 0x152;
+	return c;
+}
+
 /* glyphs are scaled so their cap height matches the system font's */
 float osk_glyph_scale_y(const osk_font_size *fs)
 {
@@ -91,6 +109,10 @@ uint32_t osk_display_char(const osk_keyboard *osk, unsigned index)
 {
 	uint32_t cp = osk->text[index];
 
+	/* the pending multi-tap letter shows even in password mode, and a
+	   pending space as an open box */
+	if (osk->tap_slot >= 0 && index + 1 == osk->caret)
+		return cp == ' ' ? 0x2423 : cp;
 	if ((osk->cfg.flags & OSK_FLAG_PASSWORD) && cp != '\n')
 		return '*';
 	return cp;

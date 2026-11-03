@@ -65,14 +65,16 @@ int main(int argc, char **argv)
 	else
 		snprintf(text[0], sizeof(text[0]), "SELFTEST PASS %d/%d\n", passed, passed);
 	strcpy(text[1], text[0]);
-	strcat(text[0], "\xC3\x80 \xC3\x89 \xC3\x91 \xC3\x9C \xC3\x98 \xC3\xB8 \xC3\xA7 \xC3\xBD \xE2\x82\xAC \xC5\x93 \xC2\xA9");
+	strcat(text[0], "\xC3\x80 \xC3\x89 \xC3\x91 \xC3\x9C \xC3\x98 \xC3\xB8 \xC3\xA7 \xC3\xBD \xE2\x82\xAC \xC5\x93 \xC2\xA9 "
+			"\xCE\xB1 \xCE\xA9 \xE2\x86\x90 \xE2\x99\xAA \xE2\x84\xA2");
 	strcat(text[1], "3.14159");
 
-	/* show every layout in turn: 90 frames each */
+	/* show every layout in turn: 90 frames each; the numpad's "alt"
+	   opens the symbol window over the cellphone keypad */
 	static const struct { osk_layout layout; bool alt; } pages[] = {
 		{ OSK_LAYOUT_QWERTY, false }, { OSK_LAYOUT_QWERTY, true },
 		{ OSK_LAYOUT_QWERTZ, false }, { OSK_LAYOUT_AZERTY, false },
-		{ OSK_LAYOUT_NUMPAD, false },
+		{ OSK_LAYOUT_NUMPAD, false }, { OSK_LAYOUT_NUMPAD, true },
 	};
 	unsigned frame = 0, page = 0;
 

@@ -42,6 +42,20 @@ static void point(osk_keyboard *osk, float x, float y, int n)
 	}
 }
 
+/* point at (x, y) and press A there */
+static void press(osk_keyboard *osk, float x, float y)
+{
+	osk_input in;
+
+	point(osk, x, y, 1);
+	memset(&in, 0, sizeof(in));
+	in.pointer_valid = true;
+	in.pointer_x = x;
+	in.pointer_y = y;
+	in.down = in.held = OSK_BTN_SELECT;
+	OSK_Update(osk, &in);
+}
+
 static void shoot(osk_keyboard *osk, const char *name)
 {
 	int w = (int)(osk->vw * scale), h = (int)(osk->vh * scale), i;
@@ -151,9 +165,48 @@ int main(int argc, char **argv)
 	shoot(osk, "fr");
 	OSK_Destroy(osk);
 
+	/* cellphone keypad: "Hello " then the 2 key tapped twice, its "B"
+	   still pending */
+	osk = make(OSK_LAYOUT_QWERTY, 0, NULL, "Hello ");
+	press(osk, 352, 424);
+	press(osk, 327, 199);
+	press(osk, 327, 199);
+	point(osk, 327, 199, 10);
+	shoot(osk, "phone");
+	/* small letters, focus on the tag */
+	press(osk, 40, 252);
+	point(osk, 40, 252, 10);
+	shoot(osk, "phone_lower");
+	/* 123 */
+	press(osk, 40, 358);
+	point(osk, 40, 358, 10);
+	shoot(osk, "phone_digits");
+	/* the symbol window, opened, then sliding to the next page */
+	press(osk, 40, 305);
+	press(osk, 443, 358);
+	point(osk, 212, 250, 20);
+	shoot(osk, "symbols");
+	press(osk, 213, 408);
+	point(osk, 213, 408, 6);
+	shoot(osk, "symbols_slide");
+	point(osk, 213, 408, 20);
+	press(osk, 213, 408);
+	press(osk, 213, 408);
+	press(osk, 213, 408);
+	press(osk, 213, 408);
+	press(osk, 213, 408);
+	point(osk, 320, 302, 24);
+	shoot(osk, "symbols_greek");
+	OSK_Destroy(osk);
+
 	osk = make(OSK_LAYOUT_NUMPAD, 0, NULL, "3.14159");
 	frames(osk, 11, 0);
 	shoot(osk, "numpad");
+	OSK_Destroy(osk);
+
+	osk = make(OSK_LAYOUT_NUMPAD, OSK_FLAG_LOCK_LAYOUT, NULL, "192.168.0.1");
+	frames(osk, 11, 0);
+	shoot(osk, "numeric");
 	OSK_Destroy(osk);
 
 	osk = make(OSK_LAYOUT_QWERTY, OSK_FLAG_WIDESCREEN | OSK_FLAG_PASSWORD | OSK_FLAG_NO_CANCEL, NULL, "secret");

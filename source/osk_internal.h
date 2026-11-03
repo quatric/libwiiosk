@@ -16,10 +16,17 @@ osk_internal.h -- private declarations shared by the wiiosk sources
 #define OSK_REPEAT_DELAY	24	/* frames before auto-repeat starts */
 #define OSK_REPEAT_RATE		4	/* frames between repeats */
 
+#define OSK_TAP_FRAMES		90	/* a multi-tap letter is confirmed this long after the last tap */
+
 /* key animation lengths in frames */
 #define OSK_FOCUS_IN_FRAMES	5
 #define OSK_FOCUS_OUT_FRAMES	8
 #define OSK_PUSH_FRAMES		20
+
+/* symbol window: zooms in, out, and slides between pages */
+#define OSK_SYMBOL_OPEN_FRAMES	18
+#define OSK_SYMBOL_CLOSE_FRAMES	13
+#define OSK_SYMBOL_SLIDE_FRAMES	20
 
 typedef enum {
 	KEY_CHAR = 0,
@@ -32,12 +39,31 @@ typedef enum {
 	KEY_OK,
 	KEY_CANCEL,
 	KEY_TAB_LETTERS,	/* layout tabs in the toolbar */
-	KEY_TAB_NUMPAD,
+	KEY_TAB_PHONE,
 	KEY_PREDICT,		/* toggles word prediction */
 	KEY_SCROLL_L,		/* candidate bar */
 	KEY_SCROLL_R,
-	KEY_CANDIDATE
+	KEY_CANDIDATE,
+	KEY_PHONE,		/* cellphone keypad key, arg = slot 0-11 */
+	KEY_PHONE_MODE,		/* Abc / abc / ABC / 123 tag, arg = phone_mode */
+	KEY_SYMBOLS,		/* opens the symbol window */
+	KEY_SYMBOL,		/* symbol window key, arg = slot 0-19 */
+	KEY_SYMBOL_PREV,
+	KEY_SYMBOL_NEXT,
+	KEY_SYMBOL_CLOSE
 } key_kind;
+
+/* input modes of the cellphone keypad, in the order of its tags */
+typedef enum {
+	PHONE_ABC = 0,		/* capital at the start of a sentence */
+	PHONE_LOWER,
+	PHONE_UPPER,
+	PHONE_DIGITS,
+	PHONE_MODES
+} phone_mode;
+
+#define OSK_PHONE_SLOTS		12	/* 3 x 4 grid, in reading order */
+#define OSK_SYMBOL_SLOTS	20	/* 5 x 4 grid of the symbol window */
 
 /* How a key is drawn. */
 typedef enum {
@@ -47,9 +73,13 @@ typedef enum {
 	LOOK_MORE,
 	LOOK_PILL,		/* Quit / OK */
 	LOOK_TAB,
-	LOOK_PAD,		/* numpad key */
+	LOOK_PAD,		/* cellphone keypad key */
+	LOOK_PAD_BLUE,		/* its prediction and symbol keys */
+	LOOK_MODE,		/* its input mode tags */
 	LOOK_SCROLL,		/* candidate bar arrows */
-	LOOK_CANDIDATE		/* a suggested word */
+	LOOK_CANDIDATE,		/* a suggested word */
+	LOOK_SYMBOL,		/* symbol window key */
+	LOOK_SYMBOL_BUTTON	/* symbol window prev / next / close */
 } key_look;
 
 /* Code point index: [alt page][state], state = caps | shift << 1. */
@@ -59,7 +89,8 @@ typedef struct {
 	key_kind kind;
 	key_look look;
 	uint32_t cp[2][4];
-	unsigned cand;			/* KEY_CANDIDATE: index into the candidates */
+	unsigned arg;			/* KEY_CANDIDATE: index into the candidates;
+					   KEY_PHONE, KEY_PHONE_MODE, KEY_SYMBOL: see key_kind */
 
 	/* animation */
 	float focus;			/* 0..1 */
@@ -102,7 +133,22 @@ struct osk_keyboard {
 	bool utf8_dirty;
 
 	osk_layout letters;		/* letter layout behind the letters tab */
-	bool numpad;			/* numpad page shown */
+	bool phone;			/* cellphone keypad shown */
+	bool numeric;			/* OSK_LAYOUT_NUMPAD, locked: the keypad holds only numbers */
+	phone_mode mode;
+	bool phone_upper;		/* PHONE_ABC: the next letter is a capital */
+	int tap_slot;			/* key of the pending multi-tap letter (at
+					   caret - 1), -1 if none */
+	unsigned tap_index;		/* its place in the key's sequence */
+	unsigned tap_frames;		/* frames since the last tap */
+	bool symbols;			/* symbol window open */
+	unsigned symbol_page;
+	unsigned symbol_anim;		/* frames since it opened or closed */
+	unsigned symbol_slide;		/* frames since the page changed */
+	unsigned symbol_old_page;
+	int symbol_dir;			/* +1: next page, -1: previous */
+	int nunder;
+	osk_key under[OSK_MAX_KEYS];	/* the page behind the window, drawn still */
 	int nkeys;
 	osk_key keys[OSK_MAX_KEYS];
 	int focus;			/* index into keys, -1 = none */
@@ -169,6 +215,10 @@ bool osk_is_word_char(uint32_t cp);
    unknown) and CONF_GetRegion() -> dictionary language */
 osk_language osk_conf_language(int lang, int area, int region);
 
+/* osk_text.c: case mapping of the Latin-1 letters and the OE ligature */
+uint32_t osk_lower(uint32_t c);
+uint32_t osk_upper(uint32_t c);
+
 /* osk_layouts.c */
 void osk_build_keys(osk_keyboard *osk);
 /* re-add the candidate bar's keys after the base keys */
@@ -176,6 +226,16 @@ void osk_build_bar(osk_keyboard *osk);
 uint32_t osk_key_char(const osk_keyboard *osk, const osk_key *k);
 const char *osk_key_label(const osk_keyboard *osk, const osk_key *k);
 bool osk_key_latched(const osk_keyboard *osk, const osk_key *k);
+/* The characters a cellphone key cycles through in the current mode and
+   case, before the filter; returns their number (at most 16). */
+unsigned osk_phone_chars(const osk_keyboard *osk, unsigned slot, uint32_t out[16]);
+/* its key top, UTF-8 */
+void osk_phone_label(const osk_keyboard *osk, unsigned slot, char out[32]);
+/* symbol window pages */
+extern const unsigned osk_symbol_pages;
+uint32_t osk_symbol(const osk_keyboard *osk, unsigned page, unsigned slot);
+/* short dictionary name for the keypad's prediction key ("Eng", "DE") */
+const char *osk_dict_short_name(const osk_keyboard *osk);
 
 /* osk_unpack.c: data packed by tools/rcpack.py; malloc()ed, NULL on
    failure */
@@ -259,6 +319,8 @@ typedef enum {
 	OSK_TEX_BOOK_CLOSED,
 	OSK_TEX_SCROLL,
 	OSK_TEX_ROUND,
+	OSK_TEX_WINDOW_PLATE,		/* symbol window buttons */
+	OSK_TEX_FADE_BAR,		/* line under the keypad's dictionary name */
 	OSK_TEX_IMAGES,			/* number of generated images */
 	OSK_TEX_FONT = OSK_TEX_IMAGES	/* the glyph atlas, handled by the backend */
 } osk_tex;

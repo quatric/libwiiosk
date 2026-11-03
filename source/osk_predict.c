@@ -280,27 +280,9 @@ bool OSK_DictionaryFromMemory(osk_dictionary *d, const char *name,
 /*-------------------------------------------------------------
   letters
 -------------------------------------------------------------*/
-static uint32_t lower(uint32_t c)
-{
-	if ((c >= 'A' && c <= 'Z') || (c >= 0xC0 && c <= 0xDE && c != 0xD7))
-		return c + 32;
-	if (c == 0x152)
-		return 0x153;
-	return c;
-}
-
-static uint32_t upper(uint32_t c)
-{
-	if ((c >= 'a' && c <= 'z') || (c >= 0xE0 && c <= 0xFE && c != 0xF7))
-		return c - 32;
-	if (c == 0x153)
-		return 0x152;
-	return c;
-}
-
 static bool is_upper(uint32_t c)
 {
-	return lower(c) != c;
+	return osk_lower(c) != c;
 }
 
 /* accented Latin-1 lower case letter -> its base letter */
@@ -315,7 +297,7 @@ static uint32_t fold(uint32_t c)
 
 static bool is_letter(uint32_t c)
 {
-	c = lower(c);
+	c = osk_lower(c);
 	return (c >= 'a' && c <= 'z') || (c >= 0xDF && c <= 0xFF && c != 0xF7) || c == 0x153;
 }
 
@@ -328,7 +310,7 @@ bool osk_is_word_char(uint32_t c)
    letter only itself. */
 static bool matches(uint32_t typed, uint32_t dict)
 {
-	typed = lower(typed);
+	typed = osk_lower(typed);
 	return typed == dict || (fold(typed) == typed && fold(dict) == typed);
 }
 
@@ -381,7 +363,7 @@ static bool add(search *s, const uint32_t *w, unsigned n)
 	for (i = 0; i < n; i++) {
 		uint32_t cp = w[i];
 		if (s->caps_all || (s->caps_first && i == 0))
-			cp = upper(cp);
+			cp = osk_upper(cp);
 		if (!osk_accepts(osk, cp))
 			return true;
 		c->cp[i] = cp;
@@ -422,7 +404,7 @@ static void walk(search *s, walker *w, bool exact)
 			continue;
 		}
 		c = be16(p->zsd, p->charset + ci * 2);
-		if (d < s->n && (s->strict ? lower(s->typed[d]) != c : !matches(s->typed[d], c))) {
+		if (d < s->n && (s->strict ? osk_lower(s->typed[d]) != c : !matches(s->typed[d], c))) {
 			node[d] = next_sibling(w, o);
 			continue;
 		}
@@ -455,7 +437,7 @@ static void extra(search *s, bool exact)
 			if (!c)
 				break;
 			if (n < OSK_CAND_LEN)
-				word[n] = lower(c);
+				word[n] = osk_lower(c);
 		}
 		if (n > OSK_CAND_LEN || n < s->n || (exact && n != s->n))
 			continue;
@@ -474,7 +456,8 @@ static void walk_all(search *s, bool exact)
 
 bool osk_predict_active(const osk_keyboard *osk)
 {
-	return osk->dict.ok && osk->predict && !osk->numpad &&
+	return osk->dict.ok && osk->predict && !osk->symbols &&
+	       !(osk->phone && (osk->numeric || osk->mode == PHONE_DIGITS)) &&
 	       !(osk->cfg.flags & OSK_FLAG_PASSWORD);
 }
 

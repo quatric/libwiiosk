@@ -17,9 +17,9 @@ extern "C" {
 #endif
 
 #define WIIOSK_VERSION_MAJOR	2
-#define WIIOSK_VERSION_MINOR	2
+#define WIIOSK_VERSION_MINOR	3
 #define WIIOSK_VERSION_PATCH	0
-#define WIIOSK_VERSION_STRING	"2.2.0"
+#define WIIOSK_VERSION_STRING	"2.3.0"
 
 /* Hard upper bound for the number of characters (code points) in the buffer. */
 #define OSK_MAX_CHARS		2048
@@ -28,12 +28,14 @@ typedef struct osk_keyboard osk_keyboard;
 
 /* Key arrangement. Every letter layout also has a "More" page with accented
    Latin-1 letters and extra symbols. The toolbar tabs switch between the
-   letter layout and the numpad unless OSK_FLAG_LOCK_LAYOUT is set. */
+   letter layout and the system keyboard's cellphone keypad (multi-tap, in
+   the layout's language) unless OSK_FLAG_LOCK_LAYOUT is set. */
 typedef enum {
 	OSK_LAYOUT_QWERTY = 0,	/* US English */
 	OSK_LAYOUT_QWERTZ,	/* German */
 	OSK_LAYOUT_AZERTY,	/* French */
-	OSK_LAYOUT_NUMPAD,	/* digits, '.', ',', '-' */
+	OSK_LAYOUT_NUMPAD,	/* since 2.3: the cellphone keypad in 123 mode; with
+				   OSK_FLAG_LOCK_LAYOUT a keypad of digits, '-', '.', ',' */
 	OSK_LAYOUT_QWERTY_UK,	/* since 2.1: UK English */
 	OSK_LAYOUT_QWERTY_IT,	/* Italian */
 	OSK_LAYOUT_QWERTY_ES,	/* Spanish */
@@ -50,7 +52,7 @@ enum {
 	OSK_FLAG_GX_READY	= 1 << 6,	/* OSK_Prompt(): GX was already initialised by the app */
 	OSK_FLAG_MULTILINE	= 1 << 7,	/* Enter inserts a line break instead of confirming */
 	OSK_FLAG_NO_ENTER	= 1 << 8,	/* hide the Enter key */
-	OSK_FLAG_LOCK_LAYOUT	= 1 << 9,	/* hide the letters / numpad tabs */
+	OSK_FLAG_LOCK_LAYOUT	= 1 << 9,	/* hide the QWERTY / cellphone tabs */
 	OSK_FLAG_PREDICT_OFF	= 1 << 10	/* start with word prediction switched off */
 };
 
@@ -121,14 +123,14 @@ typedef enum {
 	OSK_SOUND_CARET_FIX,	/* caret placed with the pointer */
 	OSK_SOUND_CANDIDATE,	/* a suggested word was chosen */
 	OSK_SOUND_SCROLL,	/* candidate bar or text box scrolled */
-	OSK_SOUND_SHIFT_ON,	/* Shift or Caps latched */
+	OSK_SOUND_SHIFT_ON,	/* Shift or Caps latched, keypad input mode changed */
 	OSK_SOUND_SHIFT_OFF,
-	OSK_SOUND_MORE,		/* More page opened */
-	OSK_SOUND_BACK,		/* back from the More page */
+	OSK_SOUND_MORE,		/* More page or symbol window opened */
+	OSK_SOUND_BACK,		/* back from them, symbol page turned */
 	OSK_SOUND_PREDICT_ON,
 	OSK_SOUND_PREDICT_OFF,
 	OSK_SOUND_LETTERS,	/* letters tab */
-	OSK_SOUND_NUMPAD,	/* numpad tab */
+	OSK_SOUND_NUMPAD,	/* cellphone keypad tab */
 	OSK_SOUND_OPEN,		/* keyboard created */
 	OSK_SOUND_OK,		/* text accepted */
 	OSK_SOUND_CANCEL,
@@ -202,11 +204,15 @@ enum {
 	OSK_BTN_CARET_RIGHT	= 1 << 8,
 	OSK_BTN_CARET_HOME	= 1 << 9,
 	OSK_BTN_CARET_END	= 1 << 10,
-	OSK_BTN_SHIFT		= 1 << 11,
-	OSK_BTN_ALT		= 1 << 12,	/* toggle the "More" page */
+	OSK_BTN_SHIFT		= 1 << 11,	/* keypad: next letter mode */
+	OSK_BTN_ALT		= 1 << 12,	/* toggle the "More" page / symbol window */
 	OSK_BTN_SPACE		= 1 << 13,
 	OSK_BTN_CONFIRM		= 1 << 14,
-	OSK_BTN_CANCEL		= 1 << 15
+	OSK_BTN_CANCEL		= 1 << 15,
+	/* Since 2.3: the B button. With a cellphone keypad key in focus it
+	   steps back through the key's characters and BACKSPACE is ignored;
+	   OSK_ReadInput() sends it together with BACKSPACE. */
+	OSK_BTN_REVERSE		= 1 << 16
 };
 
 #define OSK_INPUT_MAX_TEXT	32
@@ -340,7 +346,9 @@ size_t OSK_UTF8Encode(uint32_t cp, char out[4]);
 /* Decodes one code point; returns bytes consumed (0 at end of string). */
 size_t OSK_UTF8Decode(const char *s, uint32_t *cp);
 
-/* True if the built-in font can display (and therefore accept) cp. */
+/* True if the built-in font can display (and therefore accept) cp: printable
+   ASCII, Latin-1, OE, Y diaeresis, the euro sign, Greek and the symbols of
+   the keypad's symbol window. */
 bool OSK_CanDisplay(uint32_t cp);
 
 #ifdef __cplusplus

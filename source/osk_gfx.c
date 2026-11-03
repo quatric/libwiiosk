@@ -505,6 +505,41 @@ static void gen_round(osk_image *im)
 			put_i(im, x, y, 255 * rrect(x + 0.5f, y + 0.5f, 0, 0, im->w, im->h, 10));
 }
 
+/* symbol window buttons: grey glass with a thin dark rim, darker towards
+   the right and lit along the bottom and right edges */
+static void gen_window_plate(osk_image *im)
+{
+	static const stop across[] = { { 70, 203 }, { 130, 172 } };
+	const float w = im->w, h = im->h;
+	int x, y;
+
+	for (y = 0; y < im->h; y++) {
+		for (x = 0; x < im->w; x++) {
+			float px = x + 0.5f, py = y + 0.5f;
+			float a = rrect(px, py, 2.5f, 2.5f, w - 2.5f, h - 3.5f, 8);
+			float in = rrect(px, py, 4.5f, 4.5f, w - 4.5f, h - 5.5f, 6);
+			float lit = in - rrect(px, py, 4.5f, 4.5f, w - 6.5f, h - 8.5f, 6);
+			float v = mixf(ramp(across, NSTOPS(across), x), 240, lit);
+
+			v = mixf(0, v, in);
+			put(im, x, y, v, v, v, a * 241 / 255);
+		}
+	}
+}
+
+/* white, fading out to the right */
+static void gen_fade_bar(osk_image *im)
+{
+	static const stop fade[] = {
+		{ 0, 255 }, { 16, 227 }, { 32, 160 }, { 48, 69 }, { 64, 0 },
+	};
+	int x, y;
+
+	for (y = 0; y < im->h; y++)
+		for (x = 0; x < im->w; x++)
+			put(im, x, y, 255, 255, 255, ramp(fade, NSTOPS(fade), x + 0.5f) / 255);
+}
+
 /*-------------------------------------------------------------
   text box frame corners: dark ring (tinted blue by the material)
   around white
@@ -595,6 +630,8 @@ static const struct {
 	[OSK_TEX_BOOK_CLOSED]	= {  32, 28, gen_book_closed },
 	[OSK_TEX_SCROLL]	= {  36, 32, gen_scroll },
 	[OSK_TEX_ROUND]		= {  32, 32, gen_round },
+	[OSK_TEX_WINDOW_PLATE]	= { 184, 48, gen_window_plate },
+	[OSK_TEX_FADE_BAR]	= {  64,  4, gen_fade_bar },
 };
 
 #ifndef OSK_GENERATED_TEXTURES

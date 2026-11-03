@@ -44,7 +44,7 @@ static inline u32 osk_input_wii_map(u32 b)
 {
 	static const struct { u32 from, to; } map[] = {
 		{ WPAD_BUTTON_A,	OSK_BTN_SELECT },
-		{ WPAD_BUTTON_B,	OSK_BTN_BACKSPACE },
+		{ WPAD_BUTTON_B,	OSK_BTN_BACKSPACE | OSK_BTN_REVERSE },
 		{ WPAD_BUTTON_UP,	OSK_BTN_UP },
 		{ WPAD_BUTTON_DOWN,	OSK_BTN_DOWN },
 		{ WPAD_BUTTON_LEFT,	OSK_BTN_LEFT },

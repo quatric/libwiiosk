@@ -172,6 +172,8 @@ static void put_char(osk_keyboard *osk, uint32_t cp)
 	osk->utf8_dirty = true;
 }
 
+static void phone_case(osk_keyboard *osk, bool confirmed);
+
 static bool insert_char(osk_keyboard *osk, uint32_t cp)
 {
 	if (cp == 0xA0)
@@ -182,11 +184,13 @@ static bool insert_char(osk_keyboard *osk, uint32_t cp)
 	}
 	put_char(osk, cp);
 	sound(osk, OSK_SOUND_INPUT);
+	phone_case(osk, true);
 	return true;
 }
 
 static void backspace(osk_keyboard *osk)
 {
+	osk->tap_slot = -1;		/* a pending letter is simply removed */
 	if (!osk->caret) {
 		reject(osk);
 		return;
@@ -212,8 +216,11 @@ static void delete_char(osk_keyboard *osk)
 	sound(osk, OSK_SOUND_DELETE);
 }
 
+static void phone_commit(osk_keyboard *osk);
+
 static void confirm(osk_keyboard *osk)
 {
+	phone_commit(osk);
 	if ((osk->cfg.flags & OSK_FLAG_REQUIRE_TEXT) && !osk->len) {
 		reject(osk);
 		return;
@@ -270,10 +277,150 @@ static void caret_line(osk_keyboard *osk, int dir)
 	sound(osk, OSK_SOUND_SCROLL);
 }
 
+/*-------------------------------------------------------------
+  cellphone keypad
+-------------------------------------------------------------*/
+static int find_kind(const osk_keyboard *osk, key_kind kind);
+static int default_key(const osk_keyboard *osk);
+
+/* after the caret: empty text, or ". " / "?\n" and the like */
+static bool sentence_start(const osk_keyboard *osk)
+{
+	uint32_t c, p;
+
+	if (!osk->caret)
+		return true;
+	c = osk->text[osk->caret - 1];
+	if ((c != ' ' && c != '\n') || osk->caret < 2)
+		return false;
+	p = osk->text[osk->caret - 2];
+	return p == '.' || p == '?' || p == '!';
+}
+
+/* Abc mode: capitals again at the start of a sentence; after a letter
+   is confirmed elsewhere, small letters */
+static void phone_case(osk_keyboard *osk, bool confirmed)
+{
+	if (osk->mode != PHONE_ABC)
+		return;
+	if (sentence_start(osk))
+		osk->phone_upper = true;
+	else if (confirmed)
+		osk->phone_upper = false;
+}
+
+/* confirm the pending multi-tap letter */
+static void phone_commit(osk_keyboard *osk)
+{
+	if (osk->tap_slot < 0)
+		return;
+	osk->tap_slot = -1;
+	phone_case(osk, true);
+}
+
+/* the characters of a key that the keyboard accepts */
+static unsigned phone_accepted(const osk_keyboard *osk, unsigned slot, uint32_t out[16])
+{
+	uint32_t all[16];
+	unsigned n = osk_phone_chars(osk, slot, all), i, m = 0;
+
+	for (i = 0; i < n; i++)
+		if (osk_accepts(osk, all[i]))
+			out[m++] = all[i];
+	return m;
+}
+
+/* A first tap types the key's first character as a pending letter, the
+   next taps replace it by the following ones (B: the previous ones);
+   keys with a single character type it directly. */
+static void phone_tap(osk_keyboard *osk, unsigned slot, bool reverse)
+{
+	uint32_t seq[16];
+	unsigned n = phone_accepted(osk, slot, seq);
+
+	if (osk->tap_slot == (int)slot && osk->caret) {
+		if (n > 1) {
+			osk->tap_index = (osk->tap_index + (reverse ? n - 1 : 1)) % n;
+			osk->text[osk->caret - 1] = seq[osk->tap_index];
+			osk->utf8_dirty = true;
+			osk->tap_frames = 0;
+			sound(osk, OSK_SOUND_INPUT);
+			return;
+		}
+	}
+	phone_commit(osk);
+	if (!n) {
+		reject(osk);
+		return;
+	}
+	if (n == 1) {
+		insert_char(osk, seq[0]);
+		return;
+	}
+	/* pending: the case stays until the letter is confirmed */
+	if (osk->len >= osk->max_chars) {
+		reject(osk);
+		return;
+	}
+	osk->tap_index = reverse ? n - 1 : 0;
+	put_char(osk, seq[osk->tap_index]);
+	sound(osk, OSK_SOUND_INPUT);
+	osk->tap_slot = slot;
+	osk->tap_frames = 0;
+}
+
+static void set_mode(osk_keyboard *osk, phone_mode mode)
+{
+	phone_commit(osk);
+	if (osk->mode == mode)
+		return;
+	osk->mode = mode;
+	osk->phone_upper = true;
+	sound(osk, OSK_SOUND_SHIFT_ON);
+}
+
+static void open_symbols(osk_keyboard *osk, bool open)
+{
+	int i;
+
+	phone_commit(osk);
+	/* the layer that is left is kept to be drawn at rest: the page behind
+	   the window while it is open, the window while it closes */
+	memcpy(osk->under, osk->keys, osk->nkeys * sizeof(osk_key));
+	osk->nunder = osk->nkeys;
+	for (i = 0; i < osk->nunder; i++) {
+		osk->under[i].focus = 0;
+		osk->under[i].push = -1;
+	}
+	osk->symbols = open;
+	osk->symbol_page = 0;
+	osk->symbol_anim = 0;
+	osk->symbol_slide = OSK_SYMBOL_SLIDE_FRAMES;
+	sound(osk, open ? OSK_SOUND_MORE : OSK_SOUND_BACK);
+	osk_build_keys(osk);
+	osk->focus = open ? 0 : find_kind(osk, KEY_SYMBOLS);
+	if (osk->focus < 0)
+		osk->focus = default_key(osk);
+	osk->keys[osk->focus].focus = 1;
+}
+
+static void symbol_page(osk_keyboard *osk, int dir)
+{
+	osk->symbol_old_page = osk->symbol_page;
+	osk->symbol_page = (osk->symbol_page + osk_symbol_pages + dir) % osk_symbol_pages;
+	osk->symbol_dir = dir;
+	osk->symbol_slide = 0;
+	sound(osk, OSK_SOUND_BACK);
+}
+
 static void set_focus(osk_keyboard *osk, int key)
 {
 	if (key == osk->focus)
 		return;
+	/* moving off the key of a pending letter confirms it */
+	if (osk->tap_slot >= 0 && (key < 0 || osk->keys[key].kind != KEY_PHONE ||
+				   osk->keys[key].arg != (unsigned)osk->tap_slot))
+		phone_commit(osk);
 	osk->focus = key;
 	if (key >= 0) {
 		emit(osk, OSK_EVENT_FOCUS);
@@ -303,12 +450,13 @@ static int find_kind(const osk_keyboard *osk, key_kind kind)
 	return -1;
 }
 
-/* 'q' (first key of the second row) on letter pages, '1' on the numpad */
+/* 'q' (first key of the second row) on letter pages, the top left key
+   of the cellphone keypad and the symbol window */
 static int default_key(const osk_keyboard *osk)
 {
 	int i;
 
-	if (!osk->numpad)
+	if (!osk->phone && !osk->symbols)
 		for (i = 0; i < osk->nkeys; i++)
 			if (osk->keys[i].kind == KEY_CHAR && osk->keys[i].cy > osk->keys[0].cy)
 				return i;
@@ -370,16 +518,18 @@ static void move_focus(osk_keyboard *osk, int dx, int dy)
 		set_focus(osk, found);
 }
 
-static void switch_page(osk_keyboard *osk, bool numpad)
+static void switch_page(osk_keyboard *osk, bool phone)
 {
-	key_kind tab = numpad ? KEY_TAB_NUMPAD : KEY_TAB_LETTERS;
+	key_kind tab = phone ? KEY_TAB_PHONE : KEY_TAB_LETTERS;
 	int i;
 
-	if (osk->numpad == numpad)
+	if (osk->phone == phone)
 		return;
-	sound(osk, numpad ? OSK_SOUND_NUMPAD : OSK_SOUND_LETTERS);
-	osk->numpad = numpad;
+	phone_commit(osk);
+	sound(osk, phone ? OSK_SOUND_NUMPAD : OSK_SOUND_LETTERS);
+	osk->phone = phone;
 	osk->shift = osk->caps = osk->alt = false;
+	phone_case(osk, false);
 	osk_build_keys(osk);
 	i = find_kind(osk, tab);
 	osk->focus = i >= 0 ? i : default_key(osk);
@@ -533,8 +683,29 @@ static void press_key(osk_keyboard *osk, int idx, bool repeat)
 
 	k->push = 0;
 	emit(osk, OSK_EVENT_PRESS);
+	if (k->kind != KEY_PHONE && k->kind != KEY_BACK)
+		phone_commit(osk);
 
 	switch (k->kind) {
+	case KEY_PHONE:
+		phone_tap(osk, k->arg, false);
+		break;
+	case KEY_PHONE_MODE:
+		set_mode(osk, k->arg);
+		break;
+	case KEY_SYMBOLS:
+		open_symbols(osk, true);
+		break;
+	case KEY_SYMBOL:
+		insert_char(osk, osk_symbol(osk, osk->symbol_page, k->arg));
+		break;
+	case KEY_SYMBOL_PREV:
+	case KEY_SYMBOL_NEXT:
+		symbol_page(osk, k->kind == KEY_SYMBOL_PREV ? -1 : 1);
+		break;
+	case KEY_SYMBOL_CLOSE:
+		open_symbols(osk, false);
+		break;
 	case KEY_CHAR:
 		if (insert_char(osk, osk_key_char(osk, k)))
 			osk->shift = false;
@@ -566,7 +737,7 @@ static void press_key(osk_keyboard *osk, int idx, bool repeat)
 	case KEY_TAB_LETTERS:
 		switch_page(osk, false);
 		break;
-	case KEY_TAB_NUMPAD:
+	case KEY_TAB_PHONE:
 		switch_page(osk, true);
 		break;
 	case KEY_PREDICT:
@@ -577,7 +748,7 @@ static void press_key(osk_keyboard *osk, int idx, bool repeat)
 		scroll_candidates(osk, k->kind == KEY_SCROLL_L ? -1 : 1);
 		break;
 	case KEY_CANDIDATE:
-		choose_candidate(osk, k->cand);
+		choose_candidate(osk, k->arg);
 		break;
 	}
 }
@@ -641,6 +812,10 @@ static void animate(osk_keyboard *osk)
 		if (k->push >= 0 && ++k->push > OSK_PUSH_FRAMES)
 			k->push = -1;
 	}
+	if (osk->symbol_anim < OSK_SYMBOL_OPEN_FRAMES)
+		osk->symbol_anim++;
+	if (osk->symbol_slide < OSK_SYMBOL_SLIDE_FRAMES)
+		osk->symbol_slide++;
 }
 
 /*-------------------------------------------------------------
@@ -677,8 +852,16 @@ osk_keyboard *OSK_Create(const osk_config *cfg)
 	osk->ox = (osk->vw - OSK_DESIGN_W) / 2;
 	osk->oy = 0;
 
-	osk->numpad = cfg->layout == OSK_LAYOUT_NUMPAD;
-	osk->letters = osk->numpad ? OSK_LAYOUT_QWERTY : cfg->layout;
+	/* the numpad is the cellphone keypad in 123 mode, or with the layout
+	   locked a keypad of numbers only */
+	osk->phone = cfg->layout == OSK_LAYOUT_NUMPAD;
+	osk->numeric = osk->phone && (cfg->flags & OSK_FLAG_LOCK_LAYOUT);
+	osk->mode = osk->phone ? PHONE_DIGITS : PHONE_ABC;
+	osk->phone_upper = true;
+	osk->tap_slot = -1;
+	osk->symbol_anim = OSK_SYMBOL_OPEN_FRAMES;
+	osk->symbol_slide = OSK_SYMBOL_SLIDE_FRAMES;
+	osk->letters = osk->phone ? OSK_LAYOUT_QWERTY : cfg->layout;
 	if (cfg->dictionary && !(cfg->flags & OSK_FLAG_PASSWORD))
 		osk_dict_parse(&osk->dict, cfg->dictionary);
 	osk->predict = !(cfg->flags & OSK_FLAG_PREDICT_OFF);
@@ -717,6 +900,8 @@ void OSK_SetText(osk_keyboard *osk, const char *utf8)
 	osk->caret = osk->len;
 	osk->scroll = 0;
 	osk->utf8_dirty = true;
+	osk->tap_slot = -1;
+	osk->phone_upper = sentence_start(osk);
 	ensure_caret_visible(osk);
 	refresh_prediction(osk, true);
 }
@@ -773,6 +958,22 @@ void OSK_Resume(osk_keyboard *osk)
 			 OSK_BTN_UP | OSK_BTN_DOWN | OSK_BTN_LEFT | OSK_BTN_RIGHT | \
 			 OSK_BTN_CARET_LEFT | OSK_BTN_CARET_RIGHT)
 
+/* buttons that confirm a pending multi-tap letter first */
+#define COMMITS		(OSK_BTN_DELETE | OSK_BTN_CARET_LEFT | OSK_BTN_CARET_RIGHT | \
+			 OSK_BTN_CARET_HOME | OSK_BTN_CARET_END | OSK_BTN_SHIFT | OSK_BTN_ALT | \
+			 OSK_BTN_SPACE | OSK_BTN_CONFIRM | OSK_BTN_CANCEL)
+
+/* Shift on the keypad: Abc -> abc -> ABC -> Abc */
+static void next_letter_mode(osk_keyboard *osk)
+{
+	set_mode(osk, osk->mode == PHONE_ABC ? PHONE_LOWER : osk->mode == PHONE_LOWER ? PHONE_UPPER : PHONE_ABC);
+}
+
+static bool focus_is(const osk_keyboard *osk, key_kind kind)
+{
+	return osk->focus >= 0 && osk->keys[osk->focus].kind == kind;
+}
+
 osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 {
 	u32 fire = 0, repeated = 0;
@@ -824,6 +1025,18 @@ osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 		}
 	}
 
+	/* B on a keypad key steps back through its characters instead of
+	   erasing */
+	if (((in->down | in->held) & OSK_BTN_REVERSE) && focus_is(osk, KEY_PHONE)) {
+		fire &= ~OSK_BTN_BACKSPACE;
+		if (in->down & OSK_BTN_REVERSE) {
+			osk->keys[osk->focus].push = 0;
+			phone_tap(osk, osk->keys[osk->focus].arg, true);
+		}
+	}
+	if (in->text_count || (fire & COMMITS))
+		phone_commit(osk);
+
 	for (i = 0; i < in->text_count && i < OSK_INPUT_MAX_TEXT && osk->status == OSK_STATUS_EDITING; i++) {
 		if (in->text[i] == '\n' || in->text[i] == '\r')
 			enter(osk);
@@ -846,9 +1059,18 @@ osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 		move_caret(osk, osk->caret + 1);
 	if (fire & OSK_BTN_CARET_HOME)	move_caret(osk, 0);
 	if (fire & OSK_BTN_CARET_END)	move_caret(osk, osk->len);
-	if (fire & OSK_BTN_SHIFT)	toggle_shift(osk, &osk->shift);
-	if ((fire & OSK_BTN_ALT) && !osk->numpad)
-		toggle_more(osk);
+	if ((fire & OSK_BTN_SHIFT) && !osk->symbols) {
+		if (!osk->phone)
+			toggle_shift(osk, &osk->shift);
+		else if (!osk->numeric)
+			next_letter_mode(osk);
+	}
+	if ((fire & OSK_BTN_ALT) && !osk->numeric) {
+		if (osk->phone || osk->symbols)
+			open_symbols(osk, !osk->symbols);
+		else
+			toggle_more(osk);
+	}
 	if (fire & OSK_BTN_SPACE)	insert_char(osk, ' ');
 	if (fire & OSK_BTN_UP)		move_focus(osk, 0, -1);
 	if (fire & OSK_BTN_DOWN)	move_focus(osk, 0, 1);
@@ -858,10 +1080,15 @@ osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 	if (osk->status == OSK_STATUS_EDITING) {
 		if (fire & OSK_BTN_CONFIRM)
 			confirm(osk);
+		else if ((fire & OSK_BTN_CANCEL) && osk->symbols)
+			open_symbols(osk, false);
 		else if (fire & OSK_BTN_CANCEL)
 			cancel(osk);
 	}
 
+	if (osk->tap_slot >= 0 && ++osk->tap_frames >= OSK_TAP_FRAMES)
+		phone_commit(osk);
+	phone_case(osk, false);
 	refresh_prediction(osk, false);
 	animate(osk);
 	ensure_caret_visible(osk);

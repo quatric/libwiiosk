@@ -12,7 +12,7 @@ void (*osk_usb_poll)(osk_input *in) = NULL;
 
 static const struct { u32 from, to; } wpad_map[] = {
 	{ WPAD_BUTTON_A,		OSK_BTN_SELECT },
-	{ WPAD_BUTTON_B,		OSK_BTN_BACKSPACE },
+	{ WPAD_BUTTON_B,		OSK_BTN_BACKSPACE | OSK_BTN_REVERSE },
 	{ WPAD_BUTTON_UP,		OSK_BTN_UP },
 	{ WPAD_BUTTON_DOWN,		OSK_BTN_DOWN },
 	{ WPAD_BUTTON_LEFT,		OSK_BTN_LEFT },
@@ -23,7 +23,7 @@ static const struct { u32 from, to; } wpad_map[] = {
 	{ WPAD_BUTTON_2,		OSK_BTN_CARET_RIGHT },
 	{ WPAD_BUTTON_HOME,		OSK_BTN_CANCEL },
 	{ WPAD_CLASSIC_BUTTON_A,	OSK_BTN_SELECT },
-	{ WPAD_CLASSIC_BUTTON_B,	OSK_BTN_BACKSPACE },
+	{ WPAD_CLASSIC_BUTTON_B,	OSK_BTN_BACKSPACE | OSK_BTN_REVERSE },
 	{ WPAD_CLASSIC_BUTTON_UP,	OSK_BTN_UP },
 	{ WPAD_CLASSIC_BUTTON_DOWN,	OSK_BTN_DOWN },
 	{ WPAD_CLASSIC_BUTTON_LEFT,	OSK_BTN_LEFT },
@@ -39,7 +39,7 @@ static const struct { u32 from, to; } wpad_map[] = {
 
 static const struct { u32 from, to; } pad_map[] = {
 	{ PAD_BUTTON_A,		OSK_BTN_SELECT },
-	{ PAD_BUTTON_B,		OSK_BTN_BACKSPACE },
+	{ PAD_BUTTON_B,		OSK_BTN_BACKSPACE | OSK_BTN_REVERSE },
 	{ PAD_BUTTON_UP,	OSK_BTN_UP },
 	{ PAD_BUTTON_DOWN,	OSK_BTN_DOWN },
 	{ PAD_BUTTON_LEFT,	OSK_BTN_LEFT },

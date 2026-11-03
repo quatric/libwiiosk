@@ -6,14 +6,17 @@ every element is a textured quad tinted by a black and a white
 material color, like the pictures of a 2D layout.
 -------------------------------------------------------------*/
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "osk_internal.h"
 
-/* design -> virtual screen offset, and the scale applied around a key
-   center while it is drawn */
+/* design -> virtual screen offset, the scale applied around a key
+   center while it is drawn, and around that the symbol window's zoom
+   and fade */
 static float ox, oy;
 static float xf_s = 1, xf_cx, xf_cy;
+static float win_s = 1, win_cx, win_cy, win_a = 1;
 
 static const osk_color c_white = { 255, 255, 255, 255 };
 static const osk_color c_clear = { 0, 0, 0, 0 };
@@ -69,11 +72,23 @@ static void quad(osk_tex tex, float x0, float y0, float x1, float y1,
 		 float s0, float t0, float s1, float t1,
 		 osk_color black, osk_color white, const osk_color vtx[4])
 {
-	x0 = xf_cx + (x0 - xf_cx) * xf_s + ox;
-	x1 = xf_cx + (x1 - xf_cx) * xf_s + ox;
-	y0 = xf_cy + (y0 - xf_cy) * xf_s + oy;
-	y1 = xf_cy + (y1 - xf_cy) * xf_s + oy;
-	osk_backend_quad(tex, x0, y0, x1, y1, s0, t0, s1, t1, black, white, vtx ? vtx : c_none);
+	osk_color v[4];
+	int i;
+
+	x0 = win_cx + (xf_cx + (x0 - xf_cx) * xf_s - win_cx) * win_s + ox;
+	x1 = win_cx + (xf_cx + (x1 - xf_cx) * xf_s - win_cx) * win_s + ox;
+	y0 = win_cy + (xf_cy + (y0 - xf_cy) * xf_s - win_cy) * win_s + oy;
+	y1 = win_cy + (xf_cy + (y1 - xf_cy) * xf_s - win_cy) * win_s + oy;
+	if (!vtx)
+		vtx = c_none;
+	if (win_a < 1) {
+		for (i = 0; i < 4; i++) {
+			v[i] = vtx[i];
+			v[i].a = clamp8(v[i].a * win_a);
+		}
+		vtx = v;
+	}
+	osk_backend_quad(tex, x0, y0, x1, y1, s0, t0, s1, t1, black, white, vtx);
 }
 
 static void pic(osk_tex tex, float x, float y, float w, float h, osk_color black, osk_color white)
@@ -246,8 +261,17 @@ static void draw_textbox(osk_keyboard *osk)
 		float x = OSK_TEXT_X, top = OSK_TEXT_Y + (line - osk->scroll) * OSK_TEXT_LINE_H;
 		for (i = start[line]; i < start[line + 1]; i++) {
 			uint32_t cp = osk_display_char(osk, i);
-			if (cp != '\n')
+			text_style pending = st;
+
+			if (cp == '\n')
+				continue;
+			/* the multi-tap letter still being chosen */
+			if (osk->tap_slot >= 0 && i + 1 == osk->caret) {
+				pending.top = pending.bottom = cp == 0x2423 ? rgb(255, 20, 20) : rgb(200, 50, 50);
+				x += glyph(&pending, cp, x, top);
+			} else {
 				x += glyph(&st, cp, x, top);
+			}
 		}
 	}
 
@@ -286,8 +310,12 @@ static const look_anim look_anims[] = {
 	[LOOK_PILL]	= { 1.1229f, 1.0453f, 3 },
 	[LOOK_TAB]	= { 1.1f,    1.0f,    3 },
 	[LOOK_PAD]	= { 1.4f,    1.3f,    7 },
+	[LOOK_PAD_BLUE]	= { 1.4f,    1.3f,    7 },
+	[LOOK_MODE]	= { 1.0f,    1.0f,    3 },
 	[LOOK_SCROLL]	= { 1.15f,   1.05f,   3 },
 	[LOOK_CANDIDATE] = { 1.0f,   1.0f,    3 },
+	[LOOK_SYMBOL]	= { 1.1f,    1.07f,   3 },
+	[LOOK_SYMBOL_BUTTON] = { 1.08f, 1.05f, 3 },
 };
 
 /* scale dips to push_scale 3 frames after the press and is back after 7 */
@@ -317,10 +345,12 @@ static float push_tint(const osk_key *k)
 	return 1 - smooth((float)(k->push - peak) / (OSK_PUSH_FRAMES - peak));
 }
 
-static void draw_key(osk_keyboard *osk, int idx)
+/* a blue caption with the font of the cellphone keypad's side keys */
+static const text_style pad_blue = { { 28, 30, -1 }, { 0, 72, 255, 255 }, { 0, 80, 255, 255 } };
+
+static void draw_key(osk_keyboard *osk, const osk_key *k)
 {
 	const osk_theme *th = &osk->theme;
-	const osk_key *k = &osk->keys[idx];
 	const look_anim *la = &look_anims[k->look];
 	float f = smooth(k->focus), p = push_tint(k);
 	float scale = push_scale(k, 1 + (la->focus_scale - 1) * f);
@@ -328,6 +358,7 @@ static void draw_key(osk_keyboard *osk, int idx)
 	text_style st;
 	const char *label = osk_key_label(osk, k);
 	bool latched = osk_key_latched(osk, k);
+	float dx = 0;			/* mode tags slide out */
 
 	xf_s = scale;
 	xf_cx = k->cx;
@@ -368,8 +399,31 @@ static void draw_key(osk_keyboard *osk, int idx)
 		      k->cx, k->cy, k->w - 4, 32, with_alpha(grey(80), 0), c_white);
 		break;
 	case LOOK_PAD:
+	case LOOK_PAD_BLUE:
+		if (k->look == LOOK_PAD_BLUE)
+			white.r = 216;
 		white.b = clamp8(255 - 127 * p);
 		pic_c(OSK_TEX_TOOL, k->cx, k->cy, k->w, k->h, c_clear, white);
+		break;
+	case LOOK_MODE:
+		/* the chosen tag is white and stands out from the edge, like a
+		   focused one */
+		dx = 12 * (latched ? 1 : f);
+		black = latched ? grey(0) : rgb(0, 16, 160);
+		white = latched ? c_white : rgb(144, 220, 232);
+		pic_c(OSK_TEX_TOOL, k->cx + dx, k->cy, k->w, k->h, with_alpha(black, 0), white);
+		break;
+	case LOOK_SYMBOL:
+		black = mix(grey(140), grey(32), f);
+		white.b = clamp8(255 - 159 * p);
+		pic_c(OSK_TEX_TOOL, k->cx, k->cy, k->w, k->h, with_alpha(black, 0), white);
+		break;
+	case LOOK_SYMBOL_BUTTON:
+		/* only Close shows its plate */
+		if (k->kind == KEY_SYMBOL_CLOSE) {
+			white = rgb(217, 255, clamp8(255 - 127 * p));
+			pic_c(OSK_TEX_WINDOW_PLATE, k->cx, k->cy, k->w, k->h, with_alpha(rgb(76, 138, 138), 0), white);
+		}
 		break;
 	case LOOK_SCROLL: {
 		bool can = k->kind == KEY_SCROLL_L ? osk->cand_first > 0 :
@@ -397,17 +451,49 @@ static void draw_key(osk_keyboard *osk, int idx)
 	case KEY_CHAR: {
 		uint32_t cp = osk_key_char(osk, k);
 		osk_color c = from_u32(osk_accepts(osk, cp) ? th->key_text : th->key_text_disabled);
+		text_style ch = { { 26, 27, 0 }, c, c };
 
-		if (k->look == LOOK_PAD) {
-			osk_color pc = osk_accepts(osk, cp) ? grey(72) : c;
-			text_style pad = { { 28.8f, 34.2f, 0 }, pc, pc };
-			char_centered(&pad, cp, k->cx, k->cy - 1);
-		} else {
-			text_style ch = { { 26, 27, 0 }, c, c };
-			char_centered(&ch, cp, k->cx, k->cy);
-		}
+		char_centered(&ch, cp, k->cx, k->cy);
 		break;
 	}
+	case KEY_PHONE: {
+		uint32_t seq[16];
+		unsigned n = osk_phone_chars(osk, k->arg, seq), i;
+		bool any = false;
+		char top[32];
+		osk_color c;
+
+		for (i = 0; i < n; i++)
+			any |= osk_accepts(osk, seq[i]);
+		c = any ? grey(72) : from_u32(th->key_text_disabled);
+		st = (text_style){ { 28.8f, 34.2f, 0 }, c, c };
+		osk_phone_label(osk, k->arg, top);
+		if (osk_utf8_width(top, &st.fs) > 108)
+			st.fs.sx *= 108 / osk_utf8_width(top, &st.fs);
+		text_centered(&st, top, k->cx, k->cy + 1);
+		break;
+	}
+	case KEY_PHONE_MODE:
+		st = (text_style){ { 27.2f, 32.3f, 0 }, rgb(0, 64, 255), rgb(0, 24, 98) };
+		text_centered(&st, label, k->cx - 4.5f + dx, k->cy + 0.3f);
+		break;
+	case KEY_SYMBOLS:
+		text_centered(&pad_blue, label, k->cx, k->cy + 1);
+		break;
+	case KEY_SYMBOL: {
+		uint32_t cp = osk_symbol(osk, osk->symbol_page, k->arg);
+		osk_color c = osk_accepts(osk, cp) ? grey(64) : from_u32(th->key_text_disabled);
+
+		st = (text_style){ { 35.2f, 41.8f, 0 }, c, c };
+		char_centered(&st, cp, k->cx, k->cy);
+		break;
+	}
+	case KEY_SYMBOL_PREV:
+	case KEY_SYMBOL_NEXT:
+	case KEY_SYMBOL_CLOSE:
+		st = (text_style){ { 28.8f, 34.2f, 0 }, rgb(64, 108, 108), rgb(64, 108, 108) };
+		text_centered(&st, label, k->cx - (k->kind == KEY_SYMBOL_CLOSE ? 4.1f : 0.8f), k->cy - 0.6f);
+		break;
 	case KEY_BACK:
 		if (k->look == LOOK_PAD)
 			pic_c(OSK_TEX_ICON_BACK, k->cx - 8, k->cy, 52, 26, c_clear, grey(128));
@@ -447,6 +533,26 @@ static void draw_key(osk_keyboard *osk, int idx)
 		/* book icon on the left, the language name in the rest */
 		float w;
 
+		if (k->look == LOOK_PAD_BLUE) {
+			/* keypad: short name with a fading line under it */
+			osk_color line[4] = { rgb(0, 68, 255), rgb(0, 68, 255), rgb(0, 68, 255), rgb(0, 68, 255) };
+
+			if (latched)
+				pic_c(OSK_TEX_BOOK_OPEN, k->cx - 32.5f, k->cy + 0.3f, 41.6f, 28.8f,
+				      with_alpha(grey(40), 0), c_white);
+			else
+				pic_c(OSK_TEX_BOOK_CLOSED, k->cx - 32.3f, k->cy + 0.3f, 32, 32,
+				      with_alpha(grey(40), 0), c_white);
+			quad(OSK_TEX_FADE_BAR, k->cx - 42.2f, k->cy + 15.3f, k->cx + 45.8f, k->cy + 17.3f,
+			     0, 0, 1, 1, c_clear, c_white, line);
+			st = pad_blue;
+			st.fs = (osk_font_size){ 32, 30, -1 };
+			w = osk_utf8_width(label, &st.fs);
+			if (w > 64)
+				st.fs.sx *= 64 / w;
+			text_centered(&st, label, k->cx + 18.6f, k->cy - 3.7f);
+			break;
+		}
 		if (latched)
 			pic_c(OSK_TEX_BOOK_OPEN, k->cx - 56, k->cy, 44, 28, with_alpha(grey(40), 0), c_white);
 		else
@@ -459,7 +565,7 @@ static void draw_key(osk_keyboard *osk, int idx)
 		break;
 	}
 	case KEY_CANDIDATE: {
-		const osk_candidate *c = &osk->cand[k->cand];
+		const osk_candidate *c = &osk->cand[k->arg];
 		float w = osk_text_width(c->cp, c->len, &osk_cand_font), x;
 		unsigned i;
 
@@ -497,23 +603,99 @@ static bool animating(const osk_key *k)
 
 /* resting keys first, then the raised ones from the least to the most
    focused so that the highlighted key ends up on top */
-static void draw_keys(osk_keyboard *osk, bool toolbar)
+static void draw_keys(osk_keyboard *osk, const osk_key *keys, int nkeys, bool toolbar)
 {
 	int order[OSK_MAX_KEYS], n = 0, i, j;
 
-	for (i = 0; i < osk->nkeys; i++)
-		if (toolbar_key(&osk->keys[i]) == toolbar && !animating(&osk->keys[i]))
-			draw_key(osk, i);
-	for (i = 0; i < osk->nkeys; i++) {
-		if (toolbar_key(&osk->keys[i]) != toolbar || !animating(&osk->keys[i]))
+	for (i = 0; i < nkeys; i++)
+		if (toolbar_key(&keys[i]) == toolbar && !animating(&keys[i]))
+			draw_key(osk, &keys[i]);
+	for (i = 0; i < nkeys; i++) {
+		if (toolbar_key(&keys[i]) != toolbar || !animating(&keys[i]))
 			continue;
-		for (j = n; j > 0 && osk->keys[order[j - 1]].focus > osk->keys[i].focus; j--)
+		for (j = n; j > 0 && keys[order[j - 1]].focus > keys[i].focus; j--)
 			order[j] = order[j - 1];
 		order[j] = i;
 		n++;
 	}
 	for (i = 0; i < n; i++)
-		draw_key(osk, order[i]);
+		draw_key(osk, &keys[order[i]]);
+}
+
+/*-------------------------------------------------------------
+  symbol window
+-------------------------------------------------------------*/
+/* 0 -> 1.01 -> 1 while opening, back to 0.75 while closing */
+static void symbol_zoom(const osk_keyboard *osk)
+{
+	float t;
+
+	win_cx = 320;
+	win_cy = 240;
+	if (osk->symbols) {
+		t = (float)osk->symbol_anim / OSK_SYMBOL_OPEN_FRAMES;
+		win_a = t;
+		win_s = t < 14.0f / 18 ? 0.75f + 0.26f * smooth(t * 18 / 14) :
+			1.01f - 0.01f * smooth((t * 18 - 14) / 4);
+	} else {
+		t = (float)osk->symbol_anim / OSK_SYMBOL_CLOSE_FRAMES;
+		win_a = 1 - t;
+		win_s = 1 - 0.25f * smooth(t);
+	}
+}
+
+/* the symbol keys showing another page, shifted and faded */
+static void draw_symbol_page(osk_keyboard *osk, const osk_key *keys, int n, unsigned page,
+			     float dx, float alpha)
+{
+	unsigned shown = osk->symbol_page;
+	float a = win_a;
+	int i;
+
+	osk->symbol_page = page;
+	win_a *= alpha;
+	for (i = 0; i < n; i++) {
+		osk_key k = keys[i];
+
+		if (k.kind != KEY_SYMBOL)
+			continue;
+		k.cx += dx;
+		draw_key(osk, &k);
+	}
+	osk->symbol_page = shown;
+	win_a = a;
+}
+
+static void draw_symbol_window(osk_keyboard *osk, const osk_key *keys, int n)
+{
+	text_style st = { { 25.6f, 30.4f, 0 }, grey(64), grey(64) };
+	char num[8];
+	int i;
+
+	symbol_zoom(osk);
+	window(OSK_TEX_FRAME_THICK, 16, 44, 163.5f, 552, 280, with_alpha(grey(0), 0), c_white);
+	/* dark strip along the bottom, a pale plate behind the page number */
+	pic_c(OSK_TEX_WHITE, 320, 408.8f, 536, 52, c_clear, (osk_color){ 0, 0, 0, 32 });
+	pic_c(OSK_TEX_TOOL, 319.7f, 406.1f, 102, 48, with_alpha(c_white, 0), (osk_color){ 255, 255, 255, 80 });
+	snprintf(num, sizeof(num), "%u/%u", osk->symbol_page + 1, osk_symbol_pages);
+	text_centered(&st, num, 316.9f, 408.4f);
+
+	if (osk->symbol_slide >= OSK_SYMBOL_SLIDE_FRAMES) {
+		draw_keys(osk, keys, n, false);
+	} else {
+		/* the old page slides out and fades while the new one comes in
+		   from the other side */
+		float t = smooth((float)osk->symbol_slide / OSK_SYMBOL_SLIDE_FRAMES);
+		float fade = fminf(osk->symbol_slide / 15.0f, 1);
+		float d = 300.0f * osk->symbol_dir;
+
+		draw_symbol_page(osk, keys, n, osk->symbol_old_page, d * t, 1 - fade);
+		draw_symbol_page(osk, keys, n, osk->symbol_page, -d * (1 - t), fade);
+		for (i = 0; i < n; i++)
+			if (keys[i].kind != KEY_SYMBOL)
+				draw_key(osk, &keys[i]);
+	}
+	win_s = win_a = 1;
 }
 
 static void draw_pointer(osk_keyboard *osk)
@@ -529,17 +711,27 @@ void osk_render(osk_keyboard *osk)
 	oy = osk->oy;
 	xf_s = 1;
 
+	/* while the symbol window is open the page behind it is drawn at
+	   rest; while it closes, the window is */
+	const osk_key *page = osk->symbols ? osk->under : osk->keys;
+	int npage = osk->symbols ? osk->nunder : osk->nkeys;
+	bool closing = !osk->symbols && osk->symbol_anim < OSK_SYMBOL_CLOSE_FRAMES;
+
 	draw_background(osk);
 	if (!(osk->cfg.flags & OSK_FLAG_LOCK_LAYOUT)) {
 		osk_color v[4];
 		vgrad(c_white, grey(224), v);
 		quad(OSK_TEX_TOOL, 250, 399, 390, 449, 0, 0, 1, 1, with_alpha(grey(126), 0), grey(231), v);
 	}
-	draw_keys(osk, true);
+	draw_keys(osk, page, npage, true);
 	draw_textbox(osk);
 	if (osk_predict_active(osk))
 		draw_bar(osk);
-	draw_keys(osk, false);
+	draw_keys(osk, page, npage, false);
+	if (osk->symbols)
+		draw_symbol_window(osk, osk->keys, osk->nkeys);
+	else if (closing)
+		draw_symbol_window(osk, osk->under, osk->nunder);
 
 	if (osk->pointer_valid && !(osk->cfg.flags & OSK_FLAG_NO_POINTER))
 		draw_pointer(osk);
