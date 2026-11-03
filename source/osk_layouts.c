@@ -562,35 +562,54 @@ uint32_t osk_key_char(const osk_keyboard *osk, const osk_key *k)
 	return k->cp[page][(osk->caps ? 1 : 0) | (osk->shift ? 2 : 0)];
 }
 
+/* the system keyboard's language independent strings, by letter layout:
+   US, UK, French, German, Italian, Spanish, Dutch */
+enum { LIS_OK, LIS_QUIT, LIS_CLOSE, LIS_MORE, LIS_SPACE, LIS_BACK, LIS_COUNT };
+
+static const char *lis(const osk_keyboard *osk, unsigned id)
+{
+	static const char *const strings[LIS_COUNT][7] = {
+		{ "OK", "OK", "OK", "O.K.", "OK", "Aceptar", "Ok\xC3\xA9" },
+		{ "Quit", "Quit", "Quitter", "Abbruch", "Annulla", "Salir", "Annuleren" },
+		{ "Close", "Close", "Fermer", "Schlie\xC3\x9F" "en", "Chiudi", "Cerrar", "Sluiten" },
+		{ "More", "\xE2\x82\xAC\xC3\xA9\xCE\xB1", "\xE2\x82\xAC\xC3\xA5\xCE\xB1",
+		  "\xE2\x82\xAC\xC3\xA9\xCE\xB1", "\xE2\x82\xAC\xC3\xA5\xCE\xB1",
+		  "\xE2\x82\xAC\xC3\xA5\xCE\xB1", "\xE2\x82\xAC\xC3\xA9\xCE\xB1" },
+		{ "Space", "Space", "", "", "", "", "Space" },
+		{ "Back", "Back", "Fermer", "Zur\xC3\xBC" "ck", "Chiudi", "Cerrar", "Stoppen" },
+	};
+	unsigned lang;
+
+	switch (osk->letters) {
+	case OSK_LAYOUT_QWERTY_UK:	lang = 1; break;
+	case OSK_LAYOUT_AZERTY:		lang = 2; break;
+	case OSK_LAYOUT_QWERTZ:		lang = 3; break;
+	case OSK_LAYOUT_QWERTY_IT:	lang = 4; break;
+	case OSK_LAYOUT_QWERTY_ES:	lang = 5; break;
+	case OSK_LAYOUT_QWERTY_NL:	lang = 6; break;
+	default:			lang = 0; break;
+	}
+	return strings[id][lang];
+}
+
 const char *osk_key_label(const osk_keyboard *osk, const osk_key *k)
 {
 	switch (k->kind) {
 	case KEY_SHIFT:		return "Shift";
 	case KEY_CAPS:		return "Caps";
-	case KEY_SPACE:		return "Space";
-	case KEY_ALT:		return osk->alt ? "Back" : "More";
-	case KEY_OK:		return "OK";
-	case KEY_CANCEL:	return "Quit";
+	case KEY_SPACE:		return lis(osk, LIS_SPACE);
+	case KEY_ALT:		return lis(osk, osk->alt ? LIS_BACK : LIS_MORE);
+	case KEY_OK:		return lis(osk, LIS_OK);
+	case KEY_CANCEL:	return lis(osk, LIS_QUIT);
 	case KEY_PREDICT:	return osk->phone ? osk_dict_short_name(osk) : osk->dict.name;
-	case KEY_SYMBOLS:	return osk->letters == OSK_LAYOUT_QWERTY ? "More" :
-				       osk->letters == OSK_LAYOUT_QWERTY_UK || osk->letters == OSK_LAYOUT_QWERTZ ||
-				       osk->letters == OSK_LAYOUT_QWERTY_NL ? "\xE2\x82\xAC\xC3\xA9\xCE\xB1" :
-				       "\xE2\x82\xAC\xC3\xA5\xCE\xB1";
+	case KEY_SYMBOLS:	return lis(osk, LIS_MORE);
 	case KEY_PHONE_MODE: {
 		static const char *const names[PHONE_MODES] = { "Abc", "abc", "ABC", "123" };
 		return names[k->arg];
 	}
 	case KEY_SYMBOL_PREV:	return "\xE2\x86\x90";
 	case KEY_SYMBOL_NEXT:	return "\xE2\x86\x92";
-	case KEY_SYMBOL_CLOSE:
-		switch (osk->letters) {
-		case OSK_LAYOUT_AZERTY:		return "Fermer";
-		case OSK_LAYOUT_QWERTZ:		return "Schlie\xC3\x9F" "en";
-		case OSK_LAYOUT_QWERTY_IT:	return "Chiudi";
-		case OSK_LAYOUT_QWERTY_ES:	return "Cerrar";
-		case OSK_LAYOUT_QWERTY_NL:	return "Sluiten";
-		default:			return "Close";
-		}
+	case KEY_SYMBOL_CLOSE:	return lis(osk, LIS_CLOSE);
 	default:		return NULL;
 	}
 }

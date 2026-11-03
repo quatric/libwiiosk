@@ -7,8 +7,9 @@ On-screen software keyboard library for Wii homebrew, built on libogc / GX.
 - The look and feel of the Wii system keyboard: glass keys that grow under the pointer, a two-line
   text box with a pulsing caret, Quit / OK buttons and QWERTY / cellphone tabs in the toolbar
 - The system keyboard's letter layouts: US, UK, Italian, Spanish and Dutch QWERTY, German QWERTZ,
-  French AZERTY. `OSK_UseSystemLanguage()` picks the layout and dictionary from the console
-  language
+  French AZERTY, with the system keyboard's button labels in the layout's language (`Abbruch` /
+  `O.K.`, `Salir` / `Aceptar`, ...). `OSK_UseSystemLanguage()` picks the layout and dictionary
+  from the console language
 - The system keyboard's cellphone keypad: multi-tap letters in the layout's language, Abc / abc /
   ABC / 123 mode tags, sentence capitals, and a symbol window with ten pages of punctuation,
   arrows, Greek and other symbols
