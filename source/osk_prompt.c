@@ -3,6 +3,7 @@ osk_prompt.c -- blocking, self-contained keyboard prompt
 -------------------------------------------------------------*/
 #include <malloc.h>
 #include <string.h>
+#include <ogc/conf.h>
 #include <wiiuse/wpad.h>
 
 #include "osk_internal.h"
@@ -53,6 +54,8 @@ osk_status OSK_Prompt(const osk_config *cfg, GXRModeObj *rmode, void *xfb,
 		c = *cfg;
 	else
 		OSK_DefaultConfig(&c);
+	if (CONF_GetAspectRatio() == CONF_ASPECT_16_9)
+		c.flags |= OSK_FLAG_WIDESCREEN;
 	c.screen_width = rmode->fbWidth;
 	c.screen_height = rmode->efbHeight;
 

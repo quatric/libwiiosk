@@ -100,7 +100,7 @@ if (OSK_Prompt(&cfg, rmode, xfb, name, sizeof(name)) == OSK_STATUS_DONE)
     printf("Hello %s\n", name);
 ```
 
-`OSK_Prompt()` initialises GX on first use. Pass `OSK_FLAG_GX_READY` if your app has already
+`OSK_Prompt()` picks 16:9 from the console's aspect setting by itself. It initialises GX on first use. Pass `OSK_FLAG_GX_READY` if your app has already
 initialised GX. It takes over the display and restores your framebuffer contents when it returns.
 It switches the Wii Remote on channel 0 to IR mode, so set your own data format again afterwards.
 
