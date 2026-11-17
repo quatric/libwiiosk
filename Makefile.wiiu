@@ -1,0 +1,68 @@
+#---------------------------------------------------------------------------------
+# libwiiosk for the Wii U: lib/libwiiuosk.a, drawn through SDL2 (wiiosk_sdl.h)
+#
+#   make -f Makefile.wiiu            lib/libwiiuosk.a
+#   make -f Makefile.wiiu install    header + lib to $DEVKITPRO/portlibs/wiiu
+#
+# Needs devkitPPC, wut and wiiu-sdl2.
+#---------------------------------------------------------------------------------
+.SUFFIXES:
+
+ifeq ($(strip $(DEVKITPRO)),)
+$(error "Please set DEVKITPRO in your environment. export DEVKITPRO=<path to>/devkitPro")
+endif
+
+export DEVKITPPC ?= $(DEVKITPRO)/devkitPPC
+export WUT_ROOT  ?= $(DEVKITPRO)/wut
+
+include $(WUT_ROOT)/share/wut_rules
+
+AR		:=	$(DEVKITPPC)/bin/powerpc-eabi-ar
+
+TARGET		:=	libwiiuosk.a
+BUILD		:=	build/wiiu
+LIBDIR		:=	lib
+
+CFLAGS		:=	-g -O2 -Wall -Wextra -Wno-unused-parameter -ffunction-sections \
+			-fdata-sections $(MACHDEP) -D__WIIU__ -D__WUT__ \
+			-Iinclude -Isource -I$(WUT_ROOT)/include \
+			-I$(DEVKITPRO)/portlibs/wiiu/include -I$(DEVKITPRO)/portlibs/ppc/include
+
+ifeq ($(TEXTURES),generated)
+CFLAGS		+=	-DOSK_GENERATED_TEXTURES
+endif
+
+# everything but the GX, ASND, WPAD/PAD, USB keyboard and OSK_Prompt parts
+CFILES		:=	osk_core.c osk_layouts.c osk_text.c osk_render.c osk_gfx.c \
+			osk_tex_data.c osk_font_data.c osk_predict.c osk_sound.c \
+			osk_sound_data.c osk_syslang.c osk_langdict.c osk_sysdict.c \
+			osk_unpack.c osk_sdl.c osk_syswiiu.c
+SRCS		:=	$(addprefix source/,$(CFILES)) $(wildcard source/dict/*.c)
+OBJS		:=	$(patsubst source/%.c,$(BUILD)/%.o,$(SRCS))
+DEPENDS		:=	$(OBJS:.o=.d)
+
+all: $(LIBDIR)/$(TARGET)
+
+$(LIBDIR)/$(TARGET): $(OBJS)
+	@mkdir -p $(LIBDIR)
+	@rm -f $@
+	@echo archiving ... $(notdir $@)
+	@$(AR) rcs $@ $(OBJS)
+
+$(BUILD)/%.o: source/%.c
+	@mkdir -p $(dir $@)
+	@echo $(notdir $<)
+	@$(CC) -MMD -MP $(CFLAGS) -c $< -o $@
+
+install: all
+	@mkdir -p $(DEVKITPRO)/portlibs/wiiu/include $(DEVKITPRO)/portlibs/wiiu/lib
+	@cp include/wiiosk.h include/wiiosk_sdl.h include/wiiosk_input_wiiu.h \
+		$(DEVKITPRO)/portlibs/wiiu/include/
+	@cp $(LIBDIR)/$(TARGET) $(DEVKITPRO)/portlibs/wiiu/lib/
+
+clean:
+	@rm -rf $(BUILD) $(LIBDIR)/$(TARGET)
+
+.PHONY: all install clean
+
+-include $(DEPENDS)

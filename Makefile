@@ -27,7 +27,9 @@ ifeq ($(TEXTURES),generated)
 CFLAGS		+=	-DOSK_GENERATED_TEXTURES
 endif
 
-CFILES		:=	$(wildcard $(SOURCES)/*.c) $(wildcard $(SOURCES)/dict/*.c)
+# osk_sdl.c and osk_syswiiu.c are the Wii U's (Makefile.wiiu)
+CFILES		:=	$(filter-out $(SOURCES)/osk_sdl.c $(SOURCES)/osk_syswiiu.c, \
+			$(wildcard $(SOURCES)/*.c)) $(wildcard $(SOURCES)/dict/*.c)
 OFILES		:=	$(patsubst $(SOURCES)/%.c,$(BUILD)/%.o,$(CFILES))
 DEPENDS		:=	$(OFILES:.o=.d)
 

@@ -1,6 +1,7 @@
 # libwiiosk
 
-On-screen software keyboard library for Wii homebrew, built on libogc / GX.
+On-screen software keyboard library for Wii homebrew, built on libogc / GX. It also builds for
+the Wii U (wut), drawn through SDL2.
 
 ![QWERTY with word prediction, the More page, AZERTY and the cellphone keypad](docs/layouts.png)
 
@@ -45,6 +46,41 @@ make TEXTURES=generated   # draw every texture procedurally instead of using the
 
 Link with `-lwiiosk -lwiiuse -lbte -logc -lm`. Add `-lwiikeyboard` only if you call
 `OSK_InitUSBKeyboard()`, and `-lasnd` only if you call `OSK_InitSound()`.
+
+## Wii U
+
+The same keyboard builds for the Wii U (wut), drawn through SDL2 instead of GX:
+
+```sh
+make -f Makefile.wiiu           # lib/libwiiuosk.a
+make -f Makefile.wiiu install   # headers + lib to $DEVKITPRO/portlibs/wiiu
+```
+
+Link with `-lwiiuosk -lSDL2`. Give it the app's renderer once, then use `OSK_Create()`,
+`OSK_Update()` and `OSK_Draw()` as on the Wii:
+
+```c
+#include <wiiosk_sdl.h>
+#include <wiiosk_input_wiiu.h>   /* libwiiuinput adapter, header only */
+
+OSK_SDL_SetRenderer(renderer);
+OSK_UseSystemLanguage(&cfg);     /* the Wii U's language and region */
+osk_keyboard *osk = OSK_Create(&cfg);
+...
+INPUT_Update();
+OSK_ReadInputWiiU(&in);           /* GamePad touch presses keys */
+osk_status st = OSK_Update(osk, &in);
+draw_my_scene();
+OSK_Draw(osk);
+SDL_RenderPresent(renderer);
+```
+
+`screen_width` x `screen_height` is mapped onto the renderer's logical size, or its output size
+if none is set. SDL can only multiply a texture by the vertex colour, so the backend bakes each
+texture recoloured for every black/white pair the keyboard uses (about 55, kept in a cache of
+128). Call `OSK_SDL_Shutdown()` before destroying the renderer. `OSK_Prompt()`, `OSK_ReadInput()`,
+`OSK_InitUSBKeyboard()` and `OSK_InitSound()` are Wii only; for sounds set `cfg.on_sound` and mix
+`OSK_GetSound()`'s samples yourself.
 
 ## Usage in a GX app
 
@@ -357,6 +393,11 @@ tools/preview/wiiosk_preview out_dir 2     # one PNG per scene, at 2x
 ```
 include/wiiosk.h            public API
 include/wiiosk_input_wii.h  libinput-wii adapter (header only)
+include/wiiosk_sdl.h        SDL2 backend (Wii U)
+include/wiiosk_input_wiiu.h libwiiuinput adapter (header only, Wii U)
+source/osk_sdl.c            SDL2 drawing backend (Wii U)
+source/osk_syswiiu.c        the Wii U's language and region
+Makefile.wiiu               lib/libwiiuosk.a for the Wii U
 source/                     library sources
 source/dict/                generated dictionaries, one object per language
 example/gx                  GX integration example

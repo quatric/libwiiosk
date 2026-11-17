@@ -10,7 +10,19 @@ warranty. See LICENSE for the full zlib license text.
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#if defined(__WIIU__) || defined(__WUT__)
+/* Wii U (wut): drawn through SDL2 (wiiosk_sdl.h) instead of GX */
+typedef uint8_t u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef int8_t s8;
+typedef int16_t s16;
+typedef int32_t s32;
+typedef float f32;
+typedef struct _gx_rmodeobj GXRModeObj;
+#else
 #include <gccore.h>
+#endif
 
 #ifdef __cplusplus
 extern "C" {
