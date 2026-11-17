@@ -75,8 +75,9 @@ OSK_Draw(osk);
 SDL_RenderPresent(renderer);
 ```
 
-`screen_width` x `screen_height` is mapped onto the renderer's logical size, or its output size
-if none is set. SDL can only multiply a texture by the vertex colour, so the backend bakes each
+The keyboard covers the renderer's logical size, or its output size if none is set; on the Wii
+U's 16:9 picture set `OSK_FLAG_WIDESCREEN`. `screen_width` x `screen_height` is the space of the
+pointer coordinates (for example 854 x 480). SDL can only multiply a texture by the vertex colour, so the backend bakes each
 texture recoloured for every black/white pair the keyboard uses (about 55, kept in a cache of
 128). Call `OSK_SDL_Shutdown()` before destroying the renderer. `OSK_Prompt()`, `OSK_ReadInput()`,
 `OSK_InitUSBKeyboard()` and `OSK_InitSound()` are Wii only; for sounds set `cfg.on_sound` and mix

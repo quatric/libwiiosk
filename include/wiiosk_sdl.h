@@ -13,8 +13,10 @@ the Wii:
 	OSK_Draw(osk);		// covers the whole screen
 	SDL_RenderPresent(renderer);
 
-The keyboard's screen_width x screen_height is mapped onto the
-renderer's logical size if one is set, otherwise onto its output.
+The keyboard covers the renderer's logical size if one is set,
+otherwise its output. On a 16:9 picture set OSK_FLAG_WIDESCREEN;
+screen_width x screen_height is the space of the pointer
+coordinates you pass in (e.g. 854 x 480).
 OSK_Draw() leaves the renderer's draw colour and blend mode as they
 were. Call OSK_SDL_Shutdown() before destroying the renderer; it
 frees the keyboard's textures.

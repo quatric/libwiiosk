@@ -164,8 +164,9 @@ void osk_backend_begin(const osk_keyboard *osk)
 	SDL_RenderGetLogicalSize(rend, &lw, &lh);
 	if (lw <= 0 || lh <= 0)
 		SDL_GetRendererOutputSize(rend, &lw, &lh);
-	sx = (float)lw / (osk->cfg.screen_width ? osk->cfg.screen_width : 640);
-	sy = (float)lh / (osk->cfg.screen_height ? osk->cfg.screen_height : 480);
+	/* the keyboard draws in its own vw x vh units (854 wide in 16:9) */
+	sx = (float)lw / osk->vw;
+	sy = (float)lh / osk->vh;
 	offx = offy = 0;
 }
 
