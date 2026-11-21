@@ -14,8 +14,6 @@ through a bit tree (node = 1, then node * 2 + bit) under its context.
 
 Models:
   MODEL_BYTES  8-bit symbols, context = the previous byte.
-  MODEL_NIBBLE 4-bit symbols, low nibble of each byte first, context =
-               the two previous nibbles.
   MODEL_IMAGE  4-bit pixels, high nibble first, rows of `width` pixels;
                context = left, up, up-left >> 2, up-right >> 2.
   MODEL_DICT   8-bit symbols of a .zsd (optionally followed by a .znd).
@@ -29,7 +27,7 @@ Models:
 
 import struct
 
-MODEL_BYTES, MODEL_NIBBLE, MODEL_IMAGE, MODEL_DICT = 0, 1, 2, 3
+MODEL_BYTES, MODEL_IMAGE, MODEL_DICT = 0, 2, 3	# 1 was a nibble model for ADPCM sounds
 
 PROB_BITS, PROB_INIT, SHIFT = 12, 2048, 4
 TOP = 1 << 24
@@ -195,31 +193,24 @@ def _code(coder, data, model, width, size):
 				out.append(v)
 			dc.after(i, out)
 	else:
-		probs = [PROB_INIT] * (4096 * 16 if model == MODEL_IMAGE else 256 * 16)
+		probs = [PROB_INIT] * (4096 * 16)
 		nibs = []
 		for i in range(size * 2):
-			if model == MODEL_IMAGE:
-				g = lambda k: nibs[k] if k >= 0 else 0
-				left = g(i - 1) if i % width else 0
-				up = g(i - width)
-				ul = g(i - width - 1) if i % width else 0
-				ur = g(i - width + 1) if (i + 1) % width else 0
-				ctx = left | up << 4 | (ul >> 2) << 8 | (ur >> 2) << 10
-			else:
-				ctx = (nibs[i - 2] if i > 1 else 0) << 4 | (nibs[i - 1] if i else 0)
+			g = lambda k: nibs[k] if k >= 0 else 0
+			left = g(i - 1) if i % width else 0
+			up = g(i - width)
+			ul = g(i - width - 1) if i % width else 0
+			ur = g(i - width + 1) if (i + 1) % width else 0
+			ctx = left | up << 4 | (ul >> 2) << 8 | (ur >> 2) << 10
 			if data is None:
 				v = symbol(coder, probs, ctx * 16, 4)
 			else:
 				b = data[i // 2]
-				if model == MODEL_IMAGE:
-					v = b >> 4 if i % 2 == 0 else b & 15
-				else:
-					v = b & 15 if i % 2 == 0 else b >> 4
+				v = b >> 4 if i % 2 == 0 else b & 15
 				symbol(coder, probs, ctx * 16, 4, v)
 			nibs.append(v)
 			if data is None and i % 2:
-				a, c = nibs[i - 1], nibs[i]
-				out.append(a << 4 | c if model == MODEL_IMAGE else c << 4 | a)
+				out.append(nibs[i - 1] << 4 | nibs[i])
 	return out
 
 

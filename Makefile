@@ -21,12 +21,6 @@ LIBDIR		:=	lib
 CFLAGS		:=	-g -O2 -Wall -Wextra -Wno-unused-parameter $(MACHDEP) \
 			-I$(CURDIR)/$(INCLUDES) -I$(LIBOGC_INC)
 
-# TEXTURES=generated draws every texture procedurally instead of using the
-# system keyboard's (see source/osk_gfx.c)
-ifeq ($(TEXTURES),generated)
-CFLAGS		+=	-DOSK_GENERATED_TEXTURES
-endif
-
 # osk_sdl.c and osk_syswiiu.c are the Wii U's (Makefile.wiiu)
 CFILES		:=	$(filter-out $(SOURCES)/osk_sdl.c $(SOURCES)/osk_syswiiu.c, \
 			$(wildcard $(SOURCES)/*.c)) $(wildcard $(SOURCES)/dict/*.c)

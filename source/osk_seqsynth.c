@@ -143,23 +143,16 @@ struct seq {
     uint32_t wtab, wtab_n;              /* RBNK WAVE contents, 0 when the waves are an RWAR */
     wave_t *waves;
     uint32_t nwaves;
-    char bank[64];
     /* playback */
     track_t t[MAX_TRACKS];
     voice_t v[MAX_VOICES];
-    uint32_t muted, seen;               /* tracks the listener turned off; tracks that have run */
-    float level[MAX_TRACKS];            /* loudest note per track, for the player's meters */
     int16_t lvar[16];
     int tempo, timebase, main_vol;
     float sound_vol;
     double ticks;                       /* fractional ticks owed */
     uint32_t sub;                       /* frames into the current millisecond */
-    uint64_t frames;
     uint32_t age, rng;
-    bool repeat, once, ended;
-    int loops;                          /* backward jumps of the loop track */
-    int loop_track;
-    float fade, fade_step;
+    bool ended;
     uint32_t label;                     /* where the sequence starts */
 };
 
@@ -452,10 +445,6 @@ static void oskseq_restart(oskseq_t *s)
     s->timebase = 48;
     s->main_vol = 127;
     s->ticks = 0;
-    s->loops = 0;
-    s->loop_track = -1;
-    s->fade = 1;
-    s->fade_step = 0;
     s->ended = false;
 }
 
@@ -516,8 +505,6 @@ oskseq_t *oskseq_open(oskseq_read_fn rd, void *ctx, uint64_t size, const char *n
     *err = "The sequence's instrument bank couldn't be found";
     if (bank >= r.bcnt) goto fail;
     uint32_t be = bu32(in, r.btab + 8 + bank * 8ull);
-    const char *bn = rsar_name(&r, bu32(in, be));
-    snprintf(s->bank, sizeof(s->bank), "%s", bn ? bn : "");
     if (!rsar_file(&r, bu32(in, be + 4ull), &d, &dn, &w, &wn)) goto fail;
     s->rbnk = grab(rd, ctx, size, d, dn);
     s->rbnk_n = dn;
@@ -762,11 +749,6 @@ static void jump(oskseq_t *s, int ti, uint32_t to)
         t->on = false;
         return;
     }
-    if (to < t->pc) {                   /* backwards: a loop. The first track that loops counts. */
-        if (s->loop_track < 0) s->loop_track = ti;
-        if (s->loop_track == ti && ++s->loops >= 2 && s->once && !s->repeat && s->fade_step == 0)
-            s->fade_step = 1.0f / (4 * OSKSEQ_RATE);
-    }
     t->pc = to;
 }
 
@@ -956,25 +938,6 @@ static void tick(oskseq_t *s)
 
 /* ---------------------------------------------------------------- rendering */
 
-void oskseq_set_once(oskseq_t *s, bool once)
-{
-    s->once = once;
-    if (!once && !s->ended) {           /* a fade that had started stops */
-        s->fade_step = 0;
-        s->fade = 1;
-    }
-}
-
-void oskseq_set_repeat(oskseq_t *s, bool repeat)
-{
-    s->repeat = repeat;
-    if (repeat && s->ended) oskseq_restart(s);     /* it had finished: from the top */
-    else if (repeat) {
-        s->fade_step = 0;
-        s->fade = 1;
-    }
-}
-
 uint32_t oskseq_render(oskseq_t *s, int16_t *out, uint32_t frames)
 {
     uint32_t done = 0;
@@ -989,17 +952,11 @@ uint32_t oskseq_render(oskseq_t *s, int16_t *out, uint32_t frames)
 
             bool any = false;
             for (int i = 0; i < MAX_TRACKS; i++) any |= s->t[i].on;
-            /* repeat: a sequence with no loop of its own (most jingles and sound effects) starts
-             * again once all its tracks have finished */
-            if (!any && s->repeat) {
-                oskseq_restart(s);
-                any = true;
-            }
             for (int i = 0; i < MAX_VOICES; i++) {
                 if (s->v[i].on) env_step(&s->v[i]);
                 any |= s->v[i].on;
             }
-            if (!any || s->fade <= 0) {
+            if (!any) {
                 s->ended = true;
                 break;
             }
@@ -1011,7 +968,6 @@ uint32_t oskseq_render(oskseq_t *s, int16_t *out, uint32_t frames)
         memset(mix, 0, n * 2 * sizeof(float));
         float master = s->sound_vol * (s->main_vol / 127.0f) * (s->main_vol / 127.0f) * 0.5f;
 
-        for (int i = 0; i < MAX_TRACKS; i++) if (s->t[i].on) s->seen |= 1u << i;
         for (int i = 0; i < MAX_VOICES; i++) {
             voice_t *v = &s->v[i];
             if (!v->on) continue;
@@ -1019,9 +975,6 @@ uint32_t oskseq_render(oskseq_t *s, int16_t *out, uint32_t frames)
             const track_t *t = &s->t[v->track];
             float tv = t->vol / 127.0f, ev = t->vol2 / 127.0f;
             float g = master * v->gain * tv * tv * ev * ev * db_to_gain(v->env);
-            if (g > s->level[v->track]) s->level[v->track] = g;
-            /* turned off: keeps its place, so it comes back in time */
-            if (s->muted >> v->track & 1) g = 0;
             int p = t->pan + v->rpan;
             if (p < 0) p = 0;
             if (p > 127) p = 127;
@@ -1051,12 +1004,8 @@ uint32_t oskseq_render(oskseq_t *s, int16_t *out, uint32_t frames)
             }
         }
         for (uint32_t k = 0; k < n; k++) {
-            if (s->fade_step > 0) {
-                s->fade -= s->fade_step;
-                if (s->fade < 0) s->fade = 0;
-            }
             for (int c = 0; c < 2; c++) {
-                float x = mix[k * 2 + c] * s->fade;
+                float x = mix[k * 2 + c];
                 x += x < 0 ? -0.5f : 0.5f;
                 out[(done + k) * 2 + c] = x > 32767 ? 32767 : x < -32768 ? -32768 : (int16_t)x;
             }
@@ -1066,40 +1015,5 @@ uint32_t oskseq_render(oskseq_t *s, int16_t *out, uint32_t frames)
         s->sub = (s->sub + n) % MS_FRAMES;
     }
 
-    s->frames += done;
     return done;
-}
-
-const char *oskseq_bank_name(const oskseq_t *s) { return s->bank; }
-uint64_t oskseq_frames(const oskseq_t *s) { return s->frames; }
-int oskseq_tempo(const oskseq_t *s) { return s->tempo; }
-
-int oskseq_tracks(const oskseq_t *s)
-{
-    int n = 0;
-    for (int i = 0; i < MAX_TRACKS; i++) n += s->t[i].on;
-    return n;
-}
-
-int oskseq_voices(const oskseq_t *s)
-{
-    int n = 0;
-    for (int i = 0; i < MAX_VOICES; i++) n += s->v[i].on;
-    return n;
-}
-
-void oskseq_set_muted(oskseq_t *s, uint32_t mask) { s->muted = mask; }
-
-int oskseq_track(oskseq_t *s, int i, int *prg, int *notes, float *level)
-{
-    if (i < 0 || i >= MAX_TRACKS) return 0;
-    int n = 0;
-    for (int k = 0; k < MAX_VOICES; k++) n += s->v[k].on && s->v[k].track == i;
-    if (prg) *prg = s->t[i].prg;
-    if (notes) *notes = n;
-    if (level) {
-        *level = s->level[i];
-        s->level[i] *= 0.5f;
-    }
-    return s->t[i].on ? 1 : (s->seen >> i & 1) || n ? 2 : 0;
 }

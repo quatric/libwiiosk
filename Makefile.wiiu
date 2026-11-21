@@ -28,13 +28,9 @@ CFLAGS		:=	-g -O2 -Wall -Wextra -Wno-unused-parameter -ffunction-sections \
 			-Iinclude -Isource -I$(WUT_ROOT)/include \
 			-I$(DEVKITPRO)/portlibs/wiiu/include -I$(DEVKITPRO)/portlibs/ppc/include
 
-ifeq ($(TEXTURES),generated)
-CFLAGS		+=	-DOSK_GENERATED_TEXTURES
-endif
-
 # everything but the GX, ASND, WPAD/PAD, USB keyboard and OSK_Prompt parts
 CFILES		:=	osk_core.c osk_layouts.c osk_text.c osk_render.c osk_gfx.c \
-			osk_tex_data.c osk_font_data.c osk_predict.c osk_sound.c \
+			osk_tex_data.c osk_font_data.c osk_predict.c \
 			osk_sound_data.c osk_brsar.c osk_seqsynth.c osk_syslang.c osk_langdict.c osk_sysdict.c \
 			osk_unpack.c osk_sdl.c osk_syswiiu.c
 SRCS		:=	$(addprefix source/,$(CFILES)) $(wildcard source/dict/*.c)

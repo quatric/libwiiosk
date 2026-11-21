@@ -15,7 +15,7 @@ data; tools/rcpack.py describes the format and the models.
 #define SHIFT		4
 #define TOP		(1u << 24)
 
-enum { MODEL_BYTES = 0, MODEL_NIBBLE, MODEL_IMAGE, MODEL_DICT };
+enum { MODEL_BYTES = 0, MODEL_IMAGE = 2, MODEL_DICT = 3 };
 
 /* MODEL_DICT context bases, 256 probabilities each */
 enum { D_OTHER = 0, D_HEAD = 256, D_EXT = 512, D_PTR0 = 528, D_PTRN = 560, D_COUNT = 752 };
@@ -156,11 +156,11 @@ u8 *osk_unpack(const u8 *in, size_t in_size, u32 *out_size)
 	size = (u32)in[0] << 24 | in[1] << 16 | in[2] << 8 | in[3];
 	model = in[4];
 	width = in[5] << 8 | in[6];
-	if (size > (16u << 20) || model > MODEL_DICT || (model == MODEL_IMAGE && !width))
+	if (size > (16u << 20) || (model != MODEL_BYTES && model != MODEL_IMAGE && model != MODEL_DICT) ||
+	    (model == MODEL_IMAGE && !width))
 		return NULL;
 
-	nprobs = model == MODEL_DICT ? D_COUNT * 256 : model == MODEL_BYTES ? 256 * 256 :
-		 model == MODEL_IMAGE ? 4096 * 16 : 256 * 16;
+	nprobs = model == MODEL_DICT ? D_COUNT * 256 : model == MODEL_BYTES ? 256 * 256 : 4096 * 16;
 	probs = malloc(nprobs * sizeof(u16));
 	out = malloc(size ? size : 1);
 	if (!probs || !out) {
@@ -188,27 +188,17 @@ u8 *osk_unpack(const u8 *in, size_t in_size, u32 *out_size)
 			dict_after(&d, i, out);
 		}
 	} else {
-		/* nibbles: n(i) reads the i-th decoded one */
-#define NIB(j)	(model == MODEL_IMAGE ? ((j) & 1 ? out[(j) / 2] & 15 : out[(j) / 2] >> 4) : \
-			 ((j) & 1 ? out[(j) / 2] >> 4 : out[(j) / 2] & 15))
+		/* 4-bit pixels, high nibble first: NIB(j) reads the j-th decoded one */
+#define NIB(j)	((j) & 1 ? out[(j) / 2] & 15 : out[(j) / 2] >> 4)
 		for (i = 0; i < size * 2; i++) {
-			unsigned ctx, v;
+			unsigned x = i % width;
+			unsigned left = x ? NIB(i - 1) : 0;
+			unsigned up = i >= width ? NIB(i - width) : 0;
+			unsigned ul = x && i >= width + 1 ? NIB(i - width - 1) : 0;
+			unsigned ur = x + 1 < width && i + 1 >= width ? NIB(i - width + 1) : 0;
+			unsigned v = symbol(&r, &probs[(left | up << 4 | (ul >> 2) << 8 | (ur >> 2) << 10) * 16], 4);
 
-			if (model == MODEL_IMAGE) {
-				unsigned x = i % width;
-				unsigned left = x ? NIB(i - 1) : 0;
-				unsigned up = i >= width ? NIB(i - width) : 0;
-				unsigned ul = x && i >= width + 1 ? NIB(i - width - 1) : 0;
-				unsigned ur = x + 1 < width && i + 1 >= width ? NIB(i - width + 1) : 0;
-				ctx = left | up << 4 | (ul >> 2) << 8 | (ur >> 2) << 10;
-			} else {
-				ctx = (i > 1 ? NIB(i - 2) : 0) << 4 | (i ? NIB(i - 1) : 0);
-			}
-			v = symbol(&r, &probs[ctx * 16], 4);
-			if (model == MODEL_IMAGE)
-				out[i / 2] = i & 1 ? (out[i / 2] & 0xF0) | v : v << 4;
-			else
-				out[i / 2] = i & 1 ? (out[i / 2] & 0x0F) | v << 4 : v;
+			out[i / 2] = i & 1 ? (out[i / 2] & 0xF0) | v : v << 4;
 		}
 #undef NIB
 	}

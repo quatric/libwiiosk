@@ -119,3 +119,14 @@ void osk_backend_quad(osk_tex tex, float x0, float y0, float x1, float y1,
 		}
 	}
 }
+
+/* the desktop has no console settings: American English */
+osk_language OSK_SystemLanguage(void)
+{
+	return OSK_LANG_EN_US;
+}
+
+osk_layout OSK_SystemLayout(void)
+{
+	return OSK_LAYOUT_QWERTY;
+}

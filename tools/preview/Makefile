@@ -2,15 +2,12 @@
 # self-test, drawn by a software rasterizer instead of GX.
 CC	?= cc
 CFLAGS	?= -O2 -g
-ifeq ($(TEXTURES),generated)
-CFLAGS	+= -DOSK_GENERATED_TEXTURES
-endif
 CFLAGS	+= -Wall -Wextra -Wno-unused-parameter -Iinclude -I../../include -I../../source
 LIBSRC	:= ../../source/osk_core.c ../../source/osk_layouts.c ../../source/osk_text.c \
 	   ../../source/osk_render.c ../../source/osk_gfx.c ../../source/osk_tex_data.c \
 	   ../../source/osk_font_data.c \
 	   ../../source/osk_predict.c $(wildcard ../../source/dict/*.c) \
-	   ../../source/osk_sound.c ../../source/osk_sound_data.c \
+	   ../../source/osk_brsar.c ../../source/osk_seqsynth.c ../../source/osk_sound_data.c \
 	   ../../source/osk_syslang.c ../../source/osk_langdict.c ../../source/osk_unpack.c
 HOSTSRC	:= soft.c png.c
 

@@ -1,16 +1,17 @@
 /*-------------------------------------------------------------
-osk_brsar.c -- the keyboard's sound effects played off its own
-sound archive (wiiSoftwareKeyboardSound.brsar)
+osk_brsar.c -- the keyboard's sound effects, played off its own
+sound archive (wiiSoftwareKeyboardSound.brsar, packed into
+osk_sound_data.c by tools/mkbrsar.py)
 
-OSK_SetSoundArchive() renders the keyboard's sounds from the archive
-instead of using the built-in PCM: sequence sounds go through the
-NW4R sequencer and synthesizer of osk_seqsynth.c (their RSEQ, RBNK
-and waves), wave sounds are decoded from their RWSD. Everything is
-rendered once, mono at 48 kHz, scaled together so that the relative
-loudness stays, and trimmed like tools/mksound.py does.
+On first use the archive is unpacked and every sound is rendered
+once: sequence sounds go through the NW4R sequencer and synthesizer
+of osk_seqsynth.c (their RSEQ, RBNK and waves), wave sounds are
+decoded from their RWSD. The sounds are mono at 48 kHz, scaled
+together so that the relative loudness stays, and trimmed. The
+archive is freed again afterwards.
 
-Its own object: apps that do not call OSK_SetSoundArchive() do not
-link the synthesizer.
+Its own object: apps that use no sound do not link the synthesizer
+or the archive.
 -------------------------------------------------------------*/
 #include <math.h>
 #include <stdlib.h>
@@ -29,27 +30,30 @@ link the synthesizer.
 #define RATE		48000
 #define MAX_SECONDS	4
 
-/* archive sound name, by osk_sound */
-static const char *const sound_names[OSK_SOUND_COUNT] = {
-	[OSK_SOUND_FOCUS]	= "WIPL_SE_CHAR_FOCUS",
-	[OSK_SOUND_INPUT]	= "WIPL_SE_CHAR_INPUT",
-	[OSK_SOUND_DELETE]	= "WIPL_SE_CHAR_DELETE",
-	[OSK_SOUND_ERROR]	= "WIPL_SE_CHAR_DELETE_ERROR",
-	[OSK_SOUND_CARET]	= "WIPL_SE_CHAR_CURSOR",
-	[OSK_SOUND_CARET_FIX]	= "WIPL_SE_CHAR_CURSOR_FIX",
-	[OSK_SOUND_CANDIDATE]	= "WIPL_SE_CHAR_DECIDE",
-	[OSK_SOUND_SCROLL]	= "WIPL_SE_LINE_SCROLL",
-	[OSK_SOUND_SHIFT_ON]	= "WIPL_SE_CHAR_LARGER",
-	[OSK_SOUND_SHIFT_OFF]	= "WIPL_SE_CHAR_LOWER",
-	[OSK_SOUND_MORE]	= "WIPL_SE_SYMBOL_PAGE_OPEN",
-	[OSK_SOUND_BACK]	= "WIPL_SE_SK_PAGE_CHG",
-	[OSK_SOUND_PREDICT_ON]	= "WIPL_SE_SK_PREDICT_ON",
-	[OSK_SOUND_PREDICT_OFF]	= "WIPL_SE_SK_PREDICT_OFF",
-	[OSK_SOUND_LETTERS]	= "WIPL_SE_SK_SWITCHING_01",
-	[OSK_SOUND_NUMPAD]	= "WIPL_SE_SK_SWITCH_TO_KETAI",
-	[OSK_SOUND_OPEN]	= "WIPL_SE_SK_OPEN",
-	[OSK_SOUND_OK]		= "WIPL_SE_SK_DECIDE_CLOSE",
-	[OSK_SOUND_CANCEL]	= "WIPL_SE_SK_CANCEL_CLOSE",
+/* archive sound name and random pitch bend in cents, by osk_sound */
+static const struct {
+	const char *name;
+	u8 jitter;
+} sounds[OSK_SOUND_COUNT] = {
+	[OSK_SOUND_FOCUS]	= { "WIPL_SE_CHAR_FOCUS", 0 },
+	[OSK_SOUND_INPUT]	= { "WIPL_SE_CHAR_INPUT", 50 },
+	[OSK_SOUND_DELETE]	= { "WIPL_SE_CHAR_DELETE", 25 },
+	[OSK_SOUND_ERROR]	= { "WIPL_SE_CHAR_DELETE_ERROR", 0 },
+	[OSK_SOUND_CARET]	= { "WIPL_SE_CHAR_CURSOR", 0 },
+	[OSK_SOUND_CARET_FIX]	= { "WIPL_SE_CHAR_CURSOR_FIX", 0 },
+	[OSK_SOUND_CANDIDATE]	= { "WIPL_SE_CHAR_DECIDE", 38 },
+	[OSK_SOUND_SCROLL]	= { "WIPL_SE_LINE_SCROLL", 0 },
+	[OSK_SOUND_SHIFT_ON]	= { "WIPL_SE_CHAR_LARGER", 0 },
+	[OSK_SOUND_SHIFT_OFF]	= { "WIPL_SE_CHAR_LOWER", 0 },
+	[OSK_SOUND_MORE]	= { "WIPL_SE_SYMBOL_PAGE_OPEN", 0 },
+	[OSK_SOUND_BACK]	= { "WIPL_SE_SK_PAGE_CHG", 0 },
+	[OSK_SOUND_PREDICT_ON]	= { "WIPL_SE_SK_PREDICT_ON", 0 },
+	[OSK_SOUND_PREDICT_OFF]	= { "WIPL_SE_SK_PREDICT_OFF", 0 },
+	[OSK_SOUND_LETTERS]	= { "WIPL_SE_SK_SWITCHING_01", 0 },
+	[OSK_SOUND_NUMPAD]	= { "WIPL_SE_SK_SWITCH_TO_KETAI", 0 },
+	[OSK_SOUND_OPEN]	= { "WIPL_SE_SK_OPEN", 0 },
+	[OSK_SOUND_OK]		= { "WIPL_SE_SK_DECIDE_CLOSE", 0 },
+	[OSK_SOUND_CANCEL]	= { "WIPL_SE_SK_CANCEL_CLOSE", 0 },
 };
 
 static const u8 *arc;
@@ -350,22 +354,8 @@ static unsigned trim(s16 *pcm, unsigned n, float scale, unsigned *start)
 	return end - s;
 }
 
-static void free_rendered(void)
+static bool render_all(const u8 *b, size_t size)
 {
-	int i;
-
-	for (i = 0; i < OSK_SOUND_COUNT; i++) {
-		free(rendered[i]);
-		rendered[i] = NULL;
-		rendered_n[i] = 0;
-	}
-}
-
-bool osk_brsar_sound(osk_sound sound, osk_sound_data *out);
-
-bool OSK_SetSoundArchive(const void *brsar, size_t size)
-{
-	const u8 *b = brsar;
 	blk sy, in;
 	u32 so, ss, io, is, stab, scnt, i;
 	s16 *raw[OSK_SOUND_COUNT] = { NULL };
@@ -373,12 +363,6 @@ bool OSK_SetSoundArchive(const void *brsar, size_t size)
 	float peak = 1, scale;
 	int s, ok = 0;
 
-	free_rendered();
-	arc = NULL;
-	arc_size = 0;
-	osk_sound_archive = NULL;
-	if (!brsar)
-		return true;
 	if (size < 0x40 || memcmp(b, "RSAR", 4))
 		return false;
 	so = be32(b + 0x10);
@@ -395,7 +379,7 @@ bool OSK_SetSoundArchive(const void *brsar, size_t size)
 	stab = bu32(&in, 0x04);
 	scnt = bu32(&in, stab);
 	if (scnt > in.n / 8)
-		goto done;
+		scnt = 0;
 
 	for (i = 0; i < scnt; i++) {
 		u32 e = bu32(&in, stab + 8 + (uint64_t)i * 8), info, fid, vol;
@@ -407,7 +391,7 @@ bool OSK_SetSoundArchive(const void *brsar, size_t size)
 		if (!name)
 			continue;
 		for (s = 0; s < OSK_SOUND_COUNT; s++)
-			if (!strcmp(name, sound_names[s]))
+			if (!strcmp(name, sounds[s].name))
 				break;
 		if (s == OSK_SOUND_COUNT || raw[s])
 			continue;
@@ -425,49 +409,63 @@ bool OSK_SetSoundArchive(const void *brsar, size_t size)
 				peak = fabsf((float)raw[s][i]);
 	scale = 0.95f * 32767 / peak;
 	for (s = 0; s < OSK_SOUND_COUNT; s++) {
-		unsigned start, n, k, fade;
+		unsigned start, n, k, fade, padded;
 
 		if (!raw[s] || !raw_n[s])
 			continue;
 		n = trim(raw[s], raw_n[s], scale, &start);
 		if (!n)
 			continue;
-		rendered[s] = ALLOC32(((n * 2 + 31) & ~31u) + 32);
+		padded = (n * 2 + 31) & ~31u;	/* 32 byte aligned and padded with silence, as ASND needs */
+		rendered[s] = ALLOC32(padded);
 		if (!rendered[s])
 			continue;
 		for (k = 0; k < n; k++) {
 			float v = raw[s][start + k] * scale;
 
-			v = v < -32768 ? -32768 : v > 32767 ? 32767 : v;
-			((s16 *)rendered[s])[k] = (s16)v;
+			rendered[s][k] = (s16)(v < -32768 ? -32768 : v > 32767 ? 32767 : v);
 		}
 		fade = n < RATE / 500 ? n : RATE / 500;
 		for (k = 0; k < fade; k++)
 			rendered[s][n - fade + k] = (s16)(rendered[s][n - fade + k] * (1.0f - (k + 1.0f) / (fade + 1)));
-		for (k = n; k < ((n * 2 + 31) & ~31u) / 2; k++)
+		for (k = n; k < padded / 2; k++)
 			rendered[s][k] = 0;
 		rendered_n[s] = n;
 		ok++;
 	}
-done:
 	for (s = 0; s < OSK_SOUND_COUNT; s++)
 		free(raw[s]);
-	if (!ok) {
-		arc = NULL;
-		arc_size = 0;
-		return false;
-	}
-	osk_sound_archive = osk_brsar_sound;
-	return true;
+	arc = NULL;
+	arc_size = 0;
+	return ok > 0;
 }
 
-bool osk_brsar_sound(osk_sound sound, osk_sound_data *out)
+bool osk_sound_load(osk_sound sound, osk_sound_data *out)
 {
-	if ((unsigned)sound >= OSK_SOUND_COUNT || !rendered[sound])
+	static bool tried;
+
+	if ((unsigned)sound >= OSK_SOUND_COUNT || !out)
+		return false;
+	if (!tried) {
+		u32 size;
+		u8 *b = osk_unpack(osk_sound_packed, osk_sound_packed_size, &size);
+
+		tried = true;
+		if (b) {
+			render_all(b, size);
+			free(b);
+		}
+	}
+	if (!rendered[sound])
 		return false;
 	out->pcm = rendered[sound];
 	out->samples = rendered_n[sound];
 	out->rate = RATE;
-	out->jitter_cents = osk_sound_clips[sound].jitter_cents;
+	out->jitter_cents = sounds[sound].jitter;
 	return true;
+}
+
+bool OSK_GetSound(osk_sound sound, osk_sound_data *out)
+{
+	return osk_sound_load(sound, out);
 }

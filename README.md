@@ -17,7 +17,7 @@ the Wii U (wut), drawn through SDL2.
 - A "More" page on every letter layout with accented Latin-1 letters, `€` and extra symbols
 - Predictive text in nine languages from the Wii keyboard's eZiText dictionaries, with a
   candidate bar like the system keyboard's; only the languages you reference are linked
-- The system keyboard's sound effects (19 sounds, 187 KB of PCM), played through ASND or handed to your
+- The system keyboard's sound effects (19 sounds, played off its sound archive, 176 KB), played through ASND or handed to your
   own mixer
 - Shift (one-shot), Caps Lock, caret movement, auto-repeat, max length (up to 2048 characters), password mode, optional
   line breaks
@@ -25,9 +25,9 @@ the Wii U (wut), drawn through SDL2.
 - 4:3 and 16:9 (anamorphic) output, NTSC and PAL
 - UTF-8 in and out
 - No asset files: the system keyboard's own textures are compiled in (packed 4-bit, about 40 KB),
-  or drawn procedurally with `make TEXTURES=generated`, and the anti-aliased proportional font
-  (Rodin NTLG Pro DB, the Wii system font) is compiled in. All built-in data (font, dictionaries,
-  sounds) is stored compressed with a small context-modelling range coder and unpacked on first use
+  and the anti-aliased proportional font (Rodin NTLG Pro DB, the Wii system font) is compiled in.
+  All built-in data (font, textures, dictionaries, the sound archive) is stored compressed with a
+  small context-modelling range coder and unpacked on first use
 - Two ways to use it:
   - Inside your own GX render loop with `OSK_Update()` and `OSK_Draw()`.
   - As a blocking `OSK_Prompt()` for console/framebuffer apps.
@@ -41,7 +41,6 @@ make                 # lib/libwiiosk.a
 make install         # copies header + lib to $DEVKITPRO/portlibs/wii
 make example         # example/gx/wiiosk_gx.dol, example/console/wiiosk_console.dol
 make -C tests/selftest
-make TEXTURES=generated   # draw every texture procedurally instead of using the system keyboard's
 ```
 
 Link with `-lwiiosk -lwiiuse -lbte -logc -lm`. Add `-lwiikeyboard` only if you call
@@ -254,31 +253,20 @@ OSK_InitSound(true);    /* true: also call ASND_Init(); link -lasnd */
 After this, every keyboard plays the system keyboard's sound effects: focus ticks, typing,
 delete, refusals, caret moves, Shift, More, the tabs, prediction, opening, OK and Cancel. Typing,
 delete and choosing a word vary their pitch slightly, like the original. `OSK_SetSoundVolume()`
-sets the ASND voice volume. The sounds are copied out on first use and upsampled to ASND's 48 kHz mix
-rate with a cubic spline, because ASND resamples without interpolation and would make the short
-32 kHz clicks gritty (about 510 KB if every sound is played).
+sets the ASND voice volume.
 
-To hear the sounds the way the system keyboard makes them, hand the library the keyboard's own sound
-archive instead of the built-in PCM:
-
-```c
-OSK_SetSoundArchive(brsar, brsar_size);   /* wiiSoftwareKeyboardSound.brsar, kept in memory */
-```
-
-Its sequence sounds run through a port of GodModeWii's NW4R sequencer and synthesizer
-(`source/osk_seqsynth.c`, the RSEQ commands, RBNK instruments with their envelopes and the RWAV
-waves) and its wave sounds are decoded from their RWSD. Everything is rendered once, mono at
-48 kHz (about 510 KB, a moment of work), scaled together so the relative loudness stays and trimmed.
-Sounds the archive lacks keep the built-in ones; `OSK_SetSoundArchive(NULL, 0)` goes back. The
-synthesizer is its own object, so apps that never call this do not link it.
+The sounds are played off the keyboard's own sound archive, `wiiSoftwareKeyboardSound.brsar`, which
+is built in (176 KB packed). On first use its sequence sounds run through a port of GodModeWii's
+NW4R sequencer and synthesizer (`source/osk_seqsynth.c`: the RSEQ commands, the RBNK instruments with
+their envelopes and the DSP-ADPCM waves) and its wave sounds are decoded from their RWSD. Everything
+is rendered once, mono at ASND's 48 kHz mix rate, scaled together so the relative loudness stays,
+and trimmed (about 510 KB for all of them). The synthesizer and the archive are their own objects,
+so apps that use no sound do not link them.
 
 Apps with their own mixer set `cfg.on_sound` instead (it replaces the ASND playback) and fetch
-the samples with `OSK_GetSound()`. Those are mono s16 at 10.7, 16 or 32 kHz, with the pitch
-variation in cents. The sound data is a separate object, so apps that use neither function do not
-link it. `tools/mksound.py` renders the sounds from the keyboard's sound archive
-(`wiiSoftwareKeyboardSound.brsar`). It interprets the sequences, samples the bank's DSP-ADPCM
-instruments with their envelopes, and stores each sound at the lowest rate that keeps its sound,
-as plain 16-bit PCM (187 KB, not compressed).
+the samples with `OSK_GetSound()`: mono s16 at 48 kHz, with the pitch variation in cents.
+`tools/mkbrsar.py` packs the archive into `source/osk_sound_data.c`; the samples of the two
+instrument-bank waves that no sound uses are zeroed first.
 
 ## libinput-wii
 
@@ -446,10 +434,9 @@ example/input_wii           input through libinput-wii
 tests/selftest              scripted self-test
 tools/mkfont.py             generates source/osk_font_data.c from the font
 tools/mkdict.py             generates source/dict/ from eZiText dictionaries
-tools/mksound.py            generates source/osk_sound_data.c from the keyboard's sound archive
+tools/mkbrsar.py            packs the keyboard's sound archive into source/osk_sound_data.c
 tools/mktex.py              generates source/osk_tex_data.c from the keyboard's textures
 tools/rcpack.py             the compressor for all built-in data (source/osk_unpack.c decodes)
-tools/preview               desktop build: previews and self-test
 nintendo_sdk_original/      original SDK package (local reference only, git-ignored)
 ```
 
@@ -464,15 +451,16 @@ The dictionaries in `source/dict/` are not original work. They are the eZiText w
 Corporation that ship with the Wii keyboard (`eZTSystem*.zsd`, `eZTNintendo*.znd`), as published
 in [eZiTextTools](https://github.com/quatric/eZiTextTools). `tools/mkdict.py` keeps only the word
 graph and the blocklist. They are not covered by the zlib license. If that matters for your project,
-leave `cfg.dictionary` unset (then nothing of them is linked) or load your own dictionary.
+clear `cfg.dictionary`, `cfg.dictionaries` and `cfg.dictionary_count` after `OSK_DefaultConfig()` and
+build your `osk_config` without it (`OSK_DefaultConfig()` references them, so they are linked); or load your own
+dictionary.
 
-The sound effects in `source/osk_sound_data.c` are not original work either. They are rendered
-from Nintendo's `wiiSoftwareKeyboardSound.brsar` (the archive itself is not included) and are not
-covered by the zlib license. They are linked only if you call `OSK_InitSound()` or `OSK_GetSound()`.
+The sound archive in `source/osk_sound_data.c` is not original work either. It is Nintendo's
+`wiiSoftwareKeyboardSound.brsar` (packed, minus one unused wave) and is not covered by the zlib license.
+It is linked only if you call `OSK_InitSound()` or `OSK_GetSound()`.
 
 The textures in `source/osk_tex_data.c` are not original work. They are converted from the SDK's
-`softKeyboard_external` TGA files by `tools/mktex.py` and are not covered by the zlib license. Build
-with `make TEXTURES=generated` to leave them out; every texture is then drawn by `source/osk_gfx.c`.
+`softKeyboard_external` TGA files by `tools/mktex.py` and are not covered by the zlib license.
 
 The font is FOT-Rodin NTLG Pro DB by Fontworks, the typeface used by the Wii system menu. It is a
 commercial font and is not included; `source/osk_font_data.c` holds glyph bitmaps rendered from it by

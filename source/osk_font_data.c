@@ -2,7 +2,7 @@
 #include "osk_internal.h"
 
 const unsigned osk_font_atlas_w = 512, osk_font_atlas_h = 384;
-const float osk_font_em = 31.0f, osk_font_cap = 24.500f, osk_font_ascent = 27.500f, osk_font_descent = 3.750f;
+const float osk_font_cap = 24.500f;
 
 /* 4-bit coverage, two texels per byte, left texel in the high nibble
    (98304 bytes unpacked), packed by tools/rcpack.py */
