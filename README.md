@@ -228,6 +228,10 @@ the extra words (Wii, Nunchuk, …) are placed after the first three suggestions
 
 ### Choosing the dictionary
 
+This is on by default: `OSK_DefaultConfig()` fills in the console language's dictionary and the
+language window's list for its region (so every dictionary gets linked). To drop them set
+`cfg.dictionary`, `cfg.dictionaries` and `cfg.dictionary_count` to NULL / NULL / 0.
+
 ```c
 static const osk_dictionary *const langs[] = { &osk_dict_en_us, &osk_dict_de, &osk_dict_fr };
 cfg.dictionaries = langs;

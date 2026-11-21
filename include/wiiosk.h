@@ -257,7 +257,10 @@ typedef struct {
 	unsigned text_count;
 } osk_input;
 
-/* Fill cfg with defaults: QWERTY, 640x480, 64 chars, built-in theme. */
+/* Fill cfg with defaults: QWERTY, 640x480, 64 chars, built-in theme, word
+   prediction in the console's language with a language window (links all nine
+   dictionaries, about 630 KB; clear cfg.dictionary, cfg.dictionaries and
+   cfg.dictionary_count to drop them). */
 void OSK_DefaultConfig(osk_config *cfg);
 const osk_theme *OSK_DefaultTheme(void);
 
@@ -333,6 +336,11 @@ bool OSK_GetSound(osk_sound sound, osk_sound_data *out);
    fr_ca, es_la) in the USA, Brazil and Latin America areas and the
    European ones elsewhere. Links no dictionary data. */
 osk_language OSK_SystemLanguage(void);
+/* The dictionaries of the console's region (the American, French-Canadian
+   and Latin American ones in the Americas, the six European ones elsewhere),
+   for osk_config.dictionaries. OSK_DefaultConfig() fills these in. Links all
+   nine dictionaries. */
+const osk_dictionary *const *OSK_SystemDictionaries(unsigned *count);
 /* The built-in dictionary for a language, NULL for OSK_LANG_NONE.
    Using either of these links all nine dictionaries (about 630 KB);
    to keep a few, switch on OSK_SystemLanguage() yourself. */

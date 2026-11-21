@@ -25,6 +25,15 @@ static void check(bool ok, const char *what)
 		snprintf(first_failure, sizeof(first_failure), "%s", what);
 }
 
+/* OSK_DefaultConfig() turns word prediction on; most cases want it off */
+static void default_config(osk_config *cfg)
+{
+	OSK_DefaultConfig(cfg);
+	cfg->dictionary = NULL;
+	cfg->dictionaries = NULL;
+	cfg->dictionary_count = 0;
+}
+
 static void on_event(osk_keyboard *osk, osk_event ev, void *user)
 {
 	if (ev == OSK_EVENT_REJECT)
@@ -128,7 +137,7 @@ static void sound_tests(void)
 	unsigned i, total = 0;
 	bool ok = true;
 
-	OSK_DefaultConfig(&cfg);
+	default_config(&cfg);
 	cfg.on_sound = on_sound;
 	cfg.max_chars = 2;
 	nsounds = 0;
@@ -208,7 +217,7 @@ static void language_tests(void)
 	check(OSK_SystemDictionary() == OSK_LanguageDictionary(OSK_SystemLanguage()), "system dictionary");
 	{
 		osk_config c;
-		OSK_DefaultConfig(&c);
+		default_config(&c);
 		OSK_UseSystemLanguage(&c);
 		check(c.layout == OSK_SystemLayout() && c.dictionary == OSK_SystemDictionary(), "use system language");
 		c.layout = OSK_LAYOUT_NUMPAD;
@@ -235,7 +244,7 @@ static void prediction_tests(void)
 	osk_dictionary dict;
 	unsigned i, seed = 1;
 
-	OSK_DefaultConfig(&cfg);
+	default_config(&cfg);
 	cfg.dictionary = &osk_dict_en_us;
 	cfg.on_event = on_event;
 	osk = OSK_Create(&cfg);
@@ -377,7 +386,7 @@ static void t9_tests(void)
 	osk_keyboard *osk;
 	unsigned i;
 
-	OSK_DefaultConfig(&cfg);
+	default_config(&cfg);
 	cfg.dictionary = &osk_dict_en_us;
 	cfg.on_event = on_event;
 	osk = OSK_Create(&cfg);
@@ -417,7 +426,7 @@ static void phone_tests(void)
 	osk_keyboard *osk;
 	int i;
 
-	OSK_DefaultConfig(&cfg);
+	default_config(&cfg);
 	cfg.on_event = on_event;
 	osk = OSK_Create(&cfg);
 	click(osk, 352, 424);				/* cellphone tab */
@@ -544,6 +553,11 @@ static void language_select_tests(void)
 	osk_keyboard *osk;
 
 	OSK_DefaultConfig(&cfg);
+	check(cfg.dictionary && cfg.dictionaries && cfg.dictionary_count >= 3, "prediction is on by default");
+	osk = OSK_Create(&cfg);
+	check(OSK_GetPrediction(osk), "default keyboard predicts");
+	OSK_Destroy(osk);
+	default_config(&cfg);
 	cfg.dictionaries = dicts;
 	cfg.dictionary_count = 3;
 	osk = OSK_Create(&cfg);
@@ -580,7 +594,7 @@ static void language_select_tests(void)
 	OSK_Destroy(osk);
 
 	/* a single dictionary keeps the plain toggle */
-	OSK_DefaultConfig(&cfg);
+	default_config(&cfg);
 	cfg.dictionary = &osk_dict_en_us;
 	osk = OSK_Create(&cfg);
 	click(osk, 133, 370);
@@ -594,7 +608,7 @@ static void numeric_tests(void)
 	osk_config cfg;
 	osk_keyboard *osk;
 
-	OSK_DefaultConfig(&cfg);
+	default_config(&cfg);
 	cfg.layout = OSK_LAYOUT_NUMERIC;
 	osk = OSK_Create(&cfg);
 	type(osk, "12a.,3-");
@@ -633,7 +647,7 @@ void run_tests(void)
 	int i;
 
 	/* --- text editing --- */
-	OSK_DefaultConfig(&cfg);
+	default_config(&cfg);
 	cfg.max_chars = 8;
 	cfg.on_event = on_event;
 	osk = OSK_Create(&cfg);
@@ -723,7 +737,7 @@ void run_tests(void)
 	OSK_Destroy(osk);
 
 	/* --- Enter, line breaks, Quit --- */
-	OSK_DefaultConfig(&cfg);
+	default_config(&cfg);
 	osk = OSK_Create(&cfg);
 	OSK_SetText(osk, "a\nb");
 	check(!strcmp(OSK_GetText(osk), "a b"), "no line breaks by default");
@@ -745,7 +759,7 @@ void run_tests(void)
 	OSK_Destroy(osk);
 
 	/* --- layout tabs --- */
-	OSK_DefaultConfig(&cfg);
+	default_config(&cfg);
 	osk = OSK_Create(&cfg);
 	click(osk, 352, 424);				/* cellphone tab */
 	click(osk, 40, 358);				/* 123 */
@@ -809,7 +823,7 @@ void run_tests(void)
 	OSK_Destroy(osk);
 
 	/* --- numpad, filter, REQUIRE_TEXT, NO_CANCEL --- */
-	OSK_DefaultConfig(&cfg);
+	default_config(&cfg);
 	cfg.layout = OSK_LAYOUT_NUMPAD;
 	cfg.filter = digits_only;
 	cfg.flags = OSK_FLAG_REQUIRE_TEXT | OSK_FLAG_NO_CANCEL;

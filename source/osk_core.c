@@ -39,6 +39,11 @@ void OSK_DefaultConfig(osk_config *cfg)
 	cfg->layout = OSK_LAYOUT_QWERTY;
 	cfg->screen_width = 640;
 	cfg->screen_height = 480;
+	/* word prediction is on by default, in the console's language, with the
+	   language window for the others of its region; set dictionary and
+	   dictionaries to NULL (and dictionary_count to 0) for none */
+	cfg->dictionaries = OSK_SystemDictionaries(&cfg->dictionary_count);
+	cfg->dictionary = OSK_LanguageDictionary(OSK_SystemLanguage());
 }
 
 /*-------------------------------------------------------------
