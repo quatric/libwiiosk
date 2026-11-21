@@ -17,7 +17,7 @@ the Wii U (wut), drawn through SDL2.
 - A "More" page on every letter layout with accented Latin-1 letters, `€` and extra symbols
 - Predictive text in nine languages from the Wii keyboard's eZiText dictionaries, with a
   candidate bar like the system keyboard's; only the languages you reference are linked
-- The system keyboard's sound effects (19 sounds, 26 KB), played through ASND or handed to your
+- The system keyboard's sound effects (19 sounds, 187 KB of PCM), played through ASND or handed to your
   own mixer
 - Shift (one-shot), Caps Lock, caret movement, auto-repeat, max length (up to 2048 characters), password mode, optional
   line breaks
@@ -235,7 +235,7 @@ OSK_InitSound(true);    /* true: also call ASND_Init(); link -lasnd */
 After this, every keyboard plays the system keyboard's sound effects: focus ticks, typing,
 delete, refusals, caret moves, Shift, More, the tabs, prediction, opening, OK and Cancel. Typing,
 delete and choosing a word vary their pitch slightly, like the original. `OSK_SetSoundVolume()`
-sets the ASND voice volume. The sounds are decoded on first use and upsampled to ASND's 48 kHz mix
+sets the ASND voice volume. The sounds are copied out on first use and upsampled to ASND's 48 kHz mix
 rate with a cubic spline, because ASND resamples without interpolation and would make the short
 32 kHz clicks gritty (about 510 KB if every sound is played).
 
@@ -245,7 +245,7 @@ variation in cents. The sound data is a separate object, so apps that use neithe
 link it. `tools/mksound.py` renders the sounds from the keyboard's sound archive
 (`wiiSoftwareKeyboardSound.brsar`). It interprets the sequences, samples the bank's DSP-ADPCM
 instruments with their envelopes, and stores each sound at the lowest rate that keeps its sound,
-as 4-bit IMA ADPCM, then packs the result (26 KB).
+as plain 16-bit PCM (187 KB, not compressed).
 
 ## libinput-wii
 
@@ -340,9 +340,9 @@ Latin-1, `Œ œ Ÿ`, `€`, Greek, typographic quotes, `™`, arrows and the key
 
 ## Compression
 
-The font atlas, the dictionaries and the sounds are packed by `tools/rcpack.py`, an adaptive binary
+The font atlas and the dictionaries are packed by `tools/rcpack.py`, an adaptive binary
 range coder like LZMA's with a context model per kind of data. The font uses neighbouring pixels,
-the sounds the previous ADPCM nibbles, and the dictionaries the structure of the eZiText word graph
+and the dictionaries the structure of the eZiText word graph
 (node heads, character indexes and pointer bytes are modelled apart). `source/osk_unpack.c`
 decodes them. Unpacking needs up to 380 KB of temporary memory (for a dictionary), freed right
 after.
@@ -350,7 +350,6 @@ after.
 | Data                 | Raw    | LZSS                 | Packed |
 |----------------------|--------|----------------------|--------|
 | Font atlas           | 96 KB  | 35 KB                | 20 KB  |
-| Sounds (IMA ADPCM)   | 47 KB  | 35 KB                | 26 KB  |
 | Dictionaries (all 9) | 889 KB | larger than raw      | 628 KB |
 
 ## Upgrading from 2.2
