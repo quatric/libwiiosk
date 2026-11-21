@@ -13,6 +13,8 @@ sound do not link the audio data.
 
 static s16 *decoded[OSK_SOUND_COUNT];
 
+bool (*osk_sound_archive)(osk_sound sound, osk_sound_data *out);
+
 /* buffers are 32 byte aligned and padded with silence, as ASND needs */
 static unsigned osk_sound_bytes(const osk_sound_clip *c)
 {
@@ -47,6 +49,10 @@ bool osk_sound_load(osk_sound sound, osk_sound_data *out, bool *owned)
 	if ((unsigned)sound >= OSK_SOUND_COUNT || !out)
 		return false;
 	c = &osk_sound_clips[sound];
+	if (osk_sound_archive && osk_sound_archive(sound, out)) {
+		*owned = false;		/* kept by the archive's renderer */
+		return true;
+	}
 	*owned = !decoded[sound];
 	if (decoded[sound]) {
 		pcm = decoded[sound];
@@ -68,6 +74,7 @@ bool OSK_GetSound(osk_sound sound, osk_sound_data *out)
 
 	if (!osk_sound_load(sound, out, &owned))
 		return false;
-	decoded[sound] = (s16 *)out->pcm;
+	if (owned)
+		decoded[sound] = (s16 *)out->pcm;
 	return true;
 }

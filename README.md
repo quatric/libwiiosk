@@ -258,6 +258,20 @@ sets the ASND voice volume. The sounds are copied out on first use and upsampled
 rate with a cubic spline, because ASND resamples without interpolation and would make the short
 32 kHz clicks gritty (about 510 KB if every sound is played).
 
+To hear the sounds the way the system keyboard makes them, hand the library the keyboard's own sound
+archive instead of the built-in PCM:
+
+```c
+OSK_SetSoundArchive(brsar, brsar_size);   /* wiiSoftwareKeyboardSound.brsar, kept in memory */
+```
+
+Its sequence sounds run through a port of GodModeWii's NW4R sequencer and synthesizer
+(`source/osk_seqsynth.c`, the RSEQ commands, RBNK instruments with their envelopes and the RWAV
+waves) and its wave sounds are decoded from their RWSD. Everything is rendered once, mono at
+48 kHz (about 510 KB, a moment of work), scaled together so the relative loudness stays and trimmed.
+Sounds the archive lacks keep the built-in ones; `OSK_SetSoundArchive(NULL, 0)` goes back. The
+synthesizer is its own object, so apps that never call this do not link it.
+
 Apps with their own mixer set `cfg.on_sound` instead (it replaces the ASND playback) and fetch
 the samples with `OSK_GetSound()`. Those are mono s16 at 10.7, 16 or 32 kHz, with the pitch
 variation in cents. The sound data is a separate object, so apps that use neither function do not

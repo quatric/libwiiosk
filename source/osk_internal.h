@@ -208,6 +208,9 @@ extern const osk_sound_clip osk_sound_clips[OSK_SOUND_COUNT];
    caller frees (or the cached one if OSK_GetSound() already made it;
    *owned tells which) */
 bool osk_sound_load(osk_sound sound, osk_sound_data *out, bool *owned);
+/* set by OSK_SetSoundArchive() (osk_brsar.c): the sounds rendered from the
+   keyboard's sound archive; false for one it does not have */
+extern bool (*osk_sound_archive)(osk_sound sound, osk_sound_data *out);
 
 /* osk_predict.c */
 bool osk_dict_parse(osk_predictor *p, const osk_dictionary *d);

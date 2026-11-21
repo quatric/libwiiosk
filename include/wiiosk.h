@@ -317,6 +317,16 @@ osk_status OSK_Prompt(const osk_config *cfg, GXRModeObj *rmode, void *xfb,
    to ASND's 48 kHz mix rate (about 510 KB for all of them), OSK_GetSound()
    at its native rate (about 190 KB). */
 bool OSK_InitSound(bool init_asnd);
+
+/* Since 2.4. Play the keyboard's sounds off its own sound archive, the way the
+   system keyboard does, instead of the built-in PCM: pass the contents of
+   wiiSoftwareKeyboardSound.brsar (it must stay in memory). Its sequences run
+   through a port of the NW4R sequencer and synthesizer and its wave sounds
+   are decoded, all rendered once (about 510 KB, a moment of work) and used by
+   OSK_InitSound() and OSK_GetSound(). Sounds the archive lacks keep the
+   built-in ones. NULL goes back to the built-in sounds. Returns false if
+   nothing could be rendered. */
+bool OSK_SetSoundArchive(const void *brsar, size_t size);
 void OSK_ShutdownSound(void);
 void OSK_SetSoundVolume(u8 volume);		/* 0..255, default 255 */
 
