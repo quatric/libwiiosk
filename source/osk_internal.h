@@ -50,7 +50,8 @@ typedef enum {
 	KEY_SYMBOL,		/* symbol window key, arg = slot 0-19 */
 	KEY_SYMBOL_PREV,
 	KEY_SYMBOL_NEXT,
-	KEY_SYMBOL_CLOSE
+	KEY_SYMBOL_CLOSE,
+	KEY_LANG		/* language window button, arg = index into cfg.dictionaries */
 } key_kind;
 
 /* input modes of the cellphone keypad, in the order of its tags */
@@ -135,6 +136,7 @@ struct osk_keyboard {
 	osk_layout letters;		/* letter layout behind the letters tab */
 	bool phone;			/* cellphone keypad shown */
 	bool numeric;			/* OSK_LAYOUT_NUMPAD, locked: the keypad holds only numbers */
+	unsigned numvar;		/* OSK_LAYOUT_NUMERIC*: 1 digits, 2 + dot, 3 + separator; 0 for the old numpad */
 	phone_mode mode;
 	bool phone_upper;		/* PHONE_ABC: the next letter is a capital */
 	int tap_slot;			/* key of the pending multi-tap letter (at
@@ -145,7 +147,9 @@ struct osk_keyboard {
 	unsigned t9_len;		/* 0: no word being typed */
 	unsigned t9_start, t9_shown;	/* where it is in the text, its length */
 	bool t9_upper;			/* PHONE_ABC: it starts with a capital */
-	bool symbols;			/* symbol window open */
+	bool symbols;			/* symbol window open (or the language window) */
+	bool langsel;			/* ... and it is the language window */
+	int dict_index;			/* the chosen cfg.dictionaries entry, -1 if none */
 	unsigned symbol_page;
 	unsigned symbol_anim;		/* frames since it opened or closed */
 	unsigned symbol_slide;		/* frames since the page changed */
@@ -242,7 +246,9 @@ void osk_phone_label(const osk_keyboard *osk, unsigned slot, char out[32]);
 extern const unsigned osk_symbol_pages;
 uint32_t osk_symbol(const osk_keyboard *osk, unsigned page, unsigned slot);
 /* short dictionary name for the keypad's prediction key ("Eng", "DE") */
-const char *osk_dict_short_name(const osk_keyboard *osk);
+const char *osk_dict_short_name(const char *name);
+const char *osk_lang_title(const osk_keyboard *osk);
+bool osk_lang_choice(const osk_keyboard *osk);	/* a list of two or more dictionaries */
 
 /* osk_unpack.c: data packed by tools/rcpack.py; malloc()ed, NULL on
    failure */

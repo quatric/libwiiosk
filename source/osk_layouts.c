@@ -280,6 +280,16 @@ unsigned osk_phone_chars(const osk_keyboard *osk, unsigned slot, uint32_t out[16
 		if (slot >= sizeof(numeric) - 1)
 			return 0;
 		out[0] = numeric[slot];
+		if (osk->numvar) {
+			/* the system keypads: 0-9, then '.' bottom right, ',' bottom left */
+			if (slot == 9)
+				out[0] = osk->numvar == 3 ? ',' : 0;
+			else if (slot == 11)
+				out[0] = osk->numvar >= 2 ? '.' : 0;
+			else if (slot == 12)
+				out[0] = 0;
+			return out[0] ? 1 : 0;
+		}
 		return 1;
 	}
 	if (slot == 10) {
@@ -348,6 +358,8 @@ static void build_phone(osk_keyboard *osk)
 	for (i = 0; i < OSK_PHONE_SLOTS; i++) {
 		if (!osk->numeric && (i == 9 || i == 11))
 			continue;
+		if (osk->numvar && (i == 9 ? osk->numvar < 3 : i == 11 && osk->numvar < 2))
+			continue;
 		k = add_key(osk, KEY_PHONE, LOOK_PAD, phone_x(i), phone_y(i), 116, 54, 115, 53);
 		if (k)
 			k->arg = i;
@@ -356,6 +368,8 @@ static void build_phone(osk_keyboard *osk)
 	if (!(osk->cfg.flags & OSK_FLAG_NO_ENTER))
 		add_key(osk, KEY_ENTER, LOOK_PAD, 583, 252, 116, 54, 115, 53);
 
+	if (osk->numvar)
+		return;
 	if (osk->numeric) {
 		/* ',' below Enter */
 		k = add_key(osk, KEY_PHONE, LOOK_PAD, 584, 305, 116, 54, 115, 53);
@@ -459,7 +473,7 @@ static void build_symbols(osk_keyboard *osk)
 
 /* "Eng", "Fra", "Esp" for the American dictionaries, the two letter
    codes for the European ones, like the system keyboard */
-const char *osk_dict_short_name(const osk_keyboard *osk)
+const char *osk_dict_short_name(const char *name)
 {
 	static const struct { const char *name, *code; } codes[] = {
 		{ "English", "Eng" }, { "English (UK)", "EN" }, { "Deutsch", "DE" },
@@ -470,14 +484,43 @@ const char *osk_dict_short_name(const osk_keyboard *osk)
 	unsigned i;
 
 	for (i = 0; i < sizeof(codes) / sizeof(codes[0]); i++)
-		if (!strcmp(osk->dict.name, codes[i].name))
+		if (!strcmp(name, codes[i].name))
 			return codes[i].code;
-	return osk->dict.name;
+	return name;
+}
+
+bool osk_lang_choice(const osk_keyboard *osk)
+{
+	return osk->dict.ok && osk->cfg.dictionaries && osk->cfg.dictionary_count > 1;
+}
+
+/* The language window of the system keyboard: buttons of 160x80 in rows
+   of three below the title, 179 apart; a single row of up to three sits
+   lower, three rows are squeezed to fit */
+static void build_langs(osk_keyboard *osk)
+{
+	unsigned n = osk->cfg.dictionary_count, rows = (n + 2) / 3, i;
+	float bh = rows > 2 ? 68 : 80;
+
+	for (i = 0; i < n; i++) {
+		unsigned row = i / 3, cols = n - row * 3 < 3 ? n - row * 3 : 3;
+		float x = 320 + (i % 3 - (cols - 1) / 2.0f) * 179;
+		float y = rows == 1 ? 261.7f : rows == 2 ? 216 + row * 97.0f : 190 + row * 73.0f;
+		osk_key *k = add_key(osk, KEY_LANG, LOOK_SYMBOL, x, y, 160, bh, 160, bh);
+
+		if (k)
+			k->arg = i;
+	}
 }
 
 void osk_build_keys(osk_keyboard *osk)
 {
 	osk->nkeys = 0;
+	if (osk->langsel) {
+		build_langs(osk);
+		osk->nbase = osk->nkeys;
+		return;
+	}
 	if (osk->symbols) {
 		build_symbols(osk);
 		osk->nbase = osk->nkeys;
@@ -564,7 +607,7 @@ uint32_t osk_key_char(const osk_keyboard *osk, const osk_key *k)
 
 /* the system keyboard's language independent strings, by letter layout:
    US, UK, French, German, Italian, Spanish, Dutch */
-enum { LIS_OK, LIS_QUIT, LIS_CLOSE, LIS_MORE, LIS_SPACE, LIS_BACK, LIS_COUNT };
+enum { LIS_OK, LIS_QUIT, LIS_CLOSE, LIS_MORE, LIS_SPACE, LIS_BACK, LIS_LANGUAGE, LIS_COUNT };
 
 static const char *lis(const osk_keyboard *osk, unsigned id)
 {
@@ -577,6 +620,8 @@ static const char *lis(const osk_keyboard *osk, unsigned id)
 		  "\xE2\x82\xAC\xC3\xA5\xCE\xB1", "\xE2\x82\xAC\xC3\xA9\xCE\xB1" },
 		{ "Space", "Space", "", "", "", "", "Space" },
 		{ "Back", "Back", "Fermer", "Zur\xC3\xBC" "ck", "Chiudi", "Cerrar", "Stoppen" },
+		{ "Language Selection", "Language Selection", "Choix de la langue", "Sprachauswahl",
+		  "Selezione lingua", "Selecci\xC3\xB3n de idioma", "Taalkeuze" },
 	};
 	unsigned lang;
 
@@ -592,6 +637,11 @@ static const char *lis(const osk_keyboard *osk, unsigned id)
 	return strings[id][lang];
 }
 
+const char *osk_lang_title(const osk_keyboard *osk)
+{
+	return lis(osk, LIS_LANGUAGE);
+}
+
 const char *osk_key_label(const osk_keyboard *osk, const osk_key *k)
 {
 	switch (k->kind) {
@@ -601,7 +651,13 @@ const char *osk_key_label(const osk_keyboard *osk, const osk_key *k)
 	case KEY_ALT:		return lis(osk, osk->alt ? LIS_BACK : LIS_MORE);
 	case KEY_OK:		return lis(osk, LIS_OK);
 	case KEY_CANCEL:	return lis(osk, LIS_QUIT);
-	case KEY_PREDICT:	return osk->phone ? osk_dict_short_name(osk) : osk->dict.name;
+	case KEY_PREDICT:	return osk->phone ? osk_dict_short_name(osk->dict.name) : osk->dict.name;
+	case KEY_LANG: {
+		const char *name = osk->cfg.dictionaries[k->arg]->name;
+
+		name = name ? name : "";
+		return osk->cfg.dictionary_count > 3 ? osk_dict_short_name(name) : name;
+	}
 	case KEY_SYMBOLS:	return lis(osk, LIS_MORE);
 	case KEY_PHONE_MODE: {
 		static const char *const names[PHONE_MODES] = { "Abc", "abc", "ABC", "123" };
@@ -623,6 +679,7 @@ bool osk_key_latched(const osk_keyboard *osk, const osk_key *k)
 	case KEY_TAB_PHONE:	return osk->phone;
 	case KEY_PREDICT:	return osk->predict;
 	case KEY_PHONE_MODE:	return osk->mode == k->arg;
+	case KEY_LANG:		return osk->predict && osk->dict_index == (int)k->arg;
 	default:		return false;
 	}
 }

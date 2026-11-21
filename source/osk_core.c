@@ -142,6 +142,9 @@ bool osk_accepts(const osk_keyboard *osk, uint32_t cp)
 	} else if (!OSK_CanDisplay(cp)) {
 		return false;
 	}
+	if (osk->numvar && !(cp >= '0' && cp <= '9') && !(osk->numvar >= 2 && cp == '.') &&
+	    !(osk->numvar == 3 && cp == ','))
+		return false;
 	if (osk->cfg.filter && !osk->cfg.filter(cp, osk->cfg.user))
 		return false;
 	return true;
@@ -473,7 +476,19 @@ static void set_mode(osk_keyboard *osk, phone_mode mode)
 	sound(osk, OSK_SOUND_SHIFT_ON);
 }
 
-static void open_symbols(osk_keyboard *osk, bool open)
+static int find_kind(const osk_keyboard *osk, key_kind kind);
+
+static int find_kind_arg(const osk_keyboard *osk, key_kind kind, int arg)
+{
+	int i;
+
+	for (i = 0; i < osk->nkeys; i++)
+		if (osk->keys[i].kind == kind && (int)osk->keys[i].arg == arg)
+			return i;
+	return -1;
+}
+
+static void open_window(osk_keyboard *osk, bool open, bool lang)
 {
 	int i;
 
@@ -486,16 +501,37 @@ static void open_symbols(osk_keyboard *osk, bool open)
 		osk->under[i].focus = 0;
 		osk->under[i].push = -1;
 	}
+	if (open && lang) {
+		/* the title strip covers the candidate bar */
+		int n = 0;
+
+		for (i = 0; i < osk->nunder; i++) {
+			key_kind kd = osk->under[i].kind;
+
+			if (kd != KEY_SCROLL_L && kd != KEY_SCROLL_R && kd != KEY_CANDIDATE)
+				osk->under[n++] = osk->under[i];
+		}
+		osk->nunder = n;
+	}
 	osk->symbols = open;
+	osk->langsel = open && lang;
 	osk->symbol_page = 0;
 	osk->symbol_anim = 0;
 	osk->symbol_slide = OSK_SYMBOL_SLIDE_FRAMES;
 	sound(osk, open ? OSK_SOUND_MORE : OSK_SOUND_BACK);
 	osk_build_keys(osk);
-	osk->focus = open ? 0 : find_kind(osk, KEY_SYMBOLS);
+	if (open && lang)
+		osk->focus = find_kind_arg(osk, KEY_LANG, osk->dict_index);
+	else
+		osk->focus = open ? 0 : find_kind(osk, lang ? KEY_PREDICT : KEY_SYMBOLS);
 	if (osk->focus < 0)
 		osk->focus = default_key(osk);
 	osk->keys[osk->focus].focus = 1;
+}
+
+static void open_symbols(osk_keyboard *osk, bool open)
+{
+	open_window(osk, open, false);
 }
 
 static void symbol_page(osk_keyboard *osk, int dir)
@@ -748,6 +784,28 @@ static void toggle_prediction(osk_keyboard *osk)
 	refresh_prediction(osk, true);
 }
 
+/* a button of the language window: its dictionary on, or off if it is
+   the one in use */
+static void choose_language(osk_keyboard *osk, unsigned i)
+{
+	osk_predictor p;
+
+	open_window(osk, false, true);
+	if (osk->predict && osk->dict_index == (int)i) {
+		toggle_prediction(osk);
+		return;
+	}
+	if (!osk_dict_parse(&p, osk->cfg.dictionaries[i])) {
+		reject(osk);
+		return;
+	}
+	osk->dict = p;
+	osk->dict_index = i;
+	osk->predict = true;
+	sound(osk, OSK_SOUND_PREDICT_ON);
+	refresh_prediction(osk, true);
+}
+
 static void toggle_shift(osk_keyboard *osk, bool *latch)
 {
 	*latch = !*latch;
@@ -835,7 +893,13 @@ static void press_key(osk_keyboard *osk, int idx, bool repeat)
 		switch_page(osk, true);
 		break;
 	case KEY_PREDICT:
-		toggle_prediction(osk);
+		if (osk_lang_choice(osk))
+			open_window(osk, true, true);
+		else
+			toggle_prediction(osk);
+		break;
+	case KEY_LANG:
+		choose_language(osk, k->arg);
 		break;
 	case KEY_SCROLL_L:
 	case KEY_SCROLL_R:
@@ -949,8 +1013,15 @@ osk_keyboard *OSK_Create(const osk_config *cfg)
 
 	/* the numpad is the cellphone keypad in 123 mode, or with the layout
 	   locked a keypad of numbers only */
-	osk->phone = cfg->layout == OSK_LAYOUT_NUMPAD;
-	osk->numeric = osk->phone && (cfg->flags & OSK_FLAG_LOCK_LAYOUT);
+	if (cfg->layout >= OSK_LAYOUT_NUMERIC) {
+		osk->numvar = cfg->layout - OSK_LAYOUT_NUMERIC + 1;
+		osk->cfg.flags |= OSK_FLAG_LOCK_LAYOUT | OSK_FLAG_NO_ENTER | OSK_FLAG_PREDICT_OFF;
+		osk->cfg.dictionary = NULL;
+		osk->cfg.dictionaries = NULL;
+		osk->cfg.dictionary_count = 0;
+	}
+	osk->phone = cfg->layout == OSK_LAYOUT_NUMPAD || osk->numvar;
+	osk->numeric = osk->phone && (osk->cfg.flags & OSK_FLAG_LOCK_LAYOUT);
 	osk->mode = osk->phone ? PHONE_DIGITS : PHONE_ABC;
 	osk->phone_upper = true;
 	osk->tap_slot = -1;
@@ -958,8 +1029,21 @@ osk_keyboard *OSK_Create(const osk_config *cfg)
 	osk->symbol_anim = OSK_SYMBOL_OPEN_FRAMES;
 	osk->symbol_slide = OSK_SYMBOL_SLIDE_FRAMES;
 	osk->letters = osk->phone ? OSK_LAYOUT_QWERTY : cfg->layout;
-	if (cfg->dictionary && !(cfg->flags & OSK_FLAG_PASSWORD))
-		osk_dict_parse(&osk->dict, cfg->dictionary);
+	osk->dict_index = -1;
+	if (!(cfg->flags & OSK_FLAG_PASSWORD)) {
+		const osk_dictionary *d = cfg->dictionary;
+		unsigned i;
+
+		if (!cfg->dictionaries)
+			osk->cfg.dictionary_count = 0;
+		if (!d && osk->cfg.dictionary_count)
+			d = cfg->dictionaries[0];
+		for (i = 0; d && i < osk->cfg.dictionary_count; i++)
+			if (cfg->dictionaries[i] == d)
+				osk->dict_index = i;
+		if (d)
+			osk_dict_parse(&osk->dict, d);
+	}
 	osk->predict = !(cfg->flags & OSK_FLAG_PREDICT_OFF);
 	osk_build_keys(osk);
 	osk->focus = default_key(osk);
@@ -1144,7 +1228,9 @@ osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 
 	if (fire & OSK_BTN_SELECT) {
 		bool rep = (repeated & OSK_BTN_SELECT) != 0;
-		if (!rep && in->pointer_valid && osk->focus < 0 && pointer_textbox(osk))
+		if (!rep && osk->langsel && in->pointer_valid && osk->focus < 0)
+			open_window(osk, false, true);
+		else if (!rep && in->pointer_valid && osk->focus < 0 && pointer_textbox(osk))
 			;
 		else if (osk->focus >= 0)
 			press_key(osk, osk->focus, rep);
@@ -1165,7 +1251,7 @@ osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 	}
 	if ((fire & OSK_BTN_ALT) && !osk->numeric) {
 		if (osk->phone || osk->symbols)
-			open_symbols(osk, !osk->symbols);
+			open_window(osk, !osk->symbols, osk->langsel);
 		else
 			toggle_more(osk);
 	}
@@ -1179,7 +1265,7 @@ osk_status OSK_Update(osk_keyboard *osk, const osk_input *in)
 		if (fire & OSK_BTN_CONFIRM)
 			confirm(osk);
 		else if ((fire & OSK_BTN_CANCEL) && osk->symbols)
-			open_symbols(osk, false);
+			open_window(osk, false, osk->langsel);
 		else if (fire & OSK_BTN_CANCEL)
 			cancel(osk);
 	}

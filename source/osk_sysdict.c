@@ -12,7 +12,7 @@ void OSK_UseSystemLanguage(osk_config *cfg)
 {
 	osk_language lang = OSK_SystemLanguage();
 
-	if (cfg->layout != OSK_LAYOUT_NUMPAD)
+	if (cfg->layout != OSK_LAYOUT_NUMPAD && cfg->layout < OSK_LAYOUT_NUMERIC)
 		cfg->layout = OSK_LanguageLayout(lang);
 	cfg->dictionary = OSK_LanguageDictionary(lang);
 }

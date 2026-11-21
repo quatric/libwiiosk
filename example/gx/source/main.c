@@ -103,6 +103,11 @@ int main(int argc, char **argv)
 		{ OSK_LAYOUT_QWERTZ, OSK_FLAG_PASSWORD | OSK_FLAG_REQUIRE_TEXT, 16, "Passwort", NULL, NULL },
 		{ OSK_LAYOUT_AZERTY, 0, 64, "Message", NULL, &osk_dict_fr },
 		{ OSK_LAYOUT_NUMPAD, OSK_FLAG_REQUIRE_TEXT, 4, "PIN (4 digits)", digits_only, NULL },
+		{ OSK_LAYOUT_NUMERIC_DOT, OSK_FLAG_REQUIRE_TEXT, 12, "Amount", NULL, NULL },
+		{ OSK_LAYOUT_QWERTY, 0, 64, "Pick a language (press the book key)", NULL, &osk_dict_en_us },
+	};
+	static const osk_dictionary *const languages[] = {
+		&osk_dict_en_us, &osk_dict_en_gb, &osk_dict_de, &osk_dict_fr, &osk_dict_es, &osk_dict_it, &osk_dict_nl,
 	};
 	char title[160], result[OSK_MAX_CHARS * 4 + 1] = "";
 	osk_config cfg;
@@ -130,6 +135,10 @@ int main(int argc, char **argv)
 			cfg.dictionary = demos[demo].dictionary;
 			if (demo == 0)
 				OSK_UseSystemLanguage(&cfg);	/* layout + dictionary */
+			if (demo == 5) {
+				cfg.dictionaries = languages;	/* the book key opens the language window */
+				cfg.dictionary_count = sizeof(languages) / sizeof(languages[0]);
+			}
 			cfg.on_event = on_event;
 			cfg.screen_width = rmode->fbWidth;
 			cfg.screen_height = rmode->efbHeight;

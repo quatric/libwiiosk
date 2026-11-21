@@ -536,6 +536,95 @@ static void phone_tests(void)
 	OSK_Destroy(osk);
 }
 
+/* the language window: several dictionaries to choose from */
+static void language_select_tests(void)
+{
+	static const osk_dictionary *const dicts[] = { &osk_dict_en_us, &osk_dict_de, &osk_dict_fr };
+	osk_config cfg;
+	osk_keyboard *osk;
+
+	OSK_DefaultConfig(&cfg);
+	cfg.dictionaries = dicts;
+	cfg.dictionary_count = 3;
+	osk = OSK_Create(&cfg);
+	check(OSK_GetPrediction(osk), "first dictionary is the default");
+	type(osk, "th");
+	check(OSK_GetCandidateCount(osk) > 0, "english candidates");
+
+	click(osk, 133, 370);				/* prediction key: opens the window */
+	check(OSK_GetPrediction(osk), "window leaves prediction on");
+	click(osk, 320, 262);				/* German */
+	check(OSK_GetPrediction(osk), "german chosen");
+	OSK_SetText(osk, "uber");
+	step(osk, 0, 0);
+	{
+		char buf[64];
+
+		OSK_CopyCandidate(osk, 0, buf, sizeof(buf));
+		check(!strcmp(buf, "\xC3\xBC" "ber"), "german candidates after choosing");
+	}
+
+	click(osk, 133, 370);
+	click(osk, 320, 262);				/* German again: prediction off */
+	check(!OSK_GetPrediction(osk), "current language turns prediction off");
+
+	click(osk, 133, 370);
+	click(osk, 499, 262);				/* French */
+	check(OSK_GetPrediction(osk), "french turns prediction on");
+
+	click(osk, 133, 370);
+	check(step(osk, OSK_BTN_CANCEL, 0) == OSK_STATUS_EDITING, "B closes the window");
+	click(osk, 133, 370);
+	click(osk, 20, 460);				/* outside */
+	check(OSK_GetStatus(osk) == OSK_STATUS_EDITING, "click outside closes the window");
+	OSK_Destroy(osk);
+
+	/* a single dictionary keeps the plain toggle */
+	OSK_DefaultConfig(&cfg);
+	cfg.dictionary = &osk_dict_en_us;
+	osk = OSK_Create(&cfg);
+	click(osk, 133, 370);
+	check(!OSK_GetPrediction(osk), "one dictionary: key toggles");
+	OSK_Destroy(osk);
+}
+
+/* the system keyboard's numeric keypads */
+static void numeric_tests(void)
+{
+	osk_config cfg;
+	osk_keyboard *osk;
+
+	OSK_DefaultConfig(&cfg);
+	cfg.layout = OSK_LAYOUT_NUMERIC;
+	osk = OSK_Create(&cfg);
+	type(osk, "12a.,3-");
+	check(!strcmp(OSK_GetText(osk), "123"), "numeric: digits only");
+	click(osk, 327, 358);				/* 0 */
+	click(osk, 211, 358);				/* where ',' would be: no key */
+	click(osk, 443, 358);				/* where '.' would be: no key */
+	check(!strcmp(OSK_GetText(osk), "1230"), "numeric: no extra keys");
+	click(osk, 584, 252);				/* where Enter would be */
+	check(OSK_GetStatus(osk) == OSK_STATUS_EDITING, "numeric: no Enter");
+	OSK_Destroy(osk);
+
+	cfg.layout = OSK_LAYOUT_NUMERIC_DOT;
+	osk = OSK_Create(&cfg);
+	type(osk, "1.2,3");
+	check(!strcmp(OSK_GetText(osk), "1.23"), "numeric dot");
+	click(osk, 443, 358);
+	check(!strcmp(OSK_GetText(osk), "1.23."), "numeric dot key");
+	OSK_Destroy(osk);
+
+	cfg.layout = OSK_LAYOUT_NUMERIC_SEPARATOR;
+	osk = OSK_Create(&cfg);
+	type(osk, "1,2.3x");
+	check(!strcmp(OSK_GetText(osk), "1,2.3"), "numeric separator");
+	click(osk, 211, 358);
+	click(osk, 443, 358);
+	check(!strcmp(OSK_GetText(osk), "1,2.3,."), "numeric separator keys");
+	OSK_Destroy(osk);
+}
+
 void run_tests(void)
 {
 	osk_config cfg;
@@ -745,5 +834,7 @@ void run_tests(void)
 
 	prediction_tests();
 	language_tests();
+	language_select_tests();
+	numeric_tests();
 	sound_tests();
 }

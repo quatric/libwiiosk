@@ -226,6 +226,21 @@ ranks the typed word itself first, then its accented forms, then the graph's ord
 the extra words (Wii, Nunchuk, …) are placed after the first three suggestions.
 `tools/mkdict.py <eZiTextTools data dir> source/dict` regenerates `source/dict/`.
 
+### Choosing the dictionary
+
+```c
+static const osk_dictionary *const langs[] = { &osk_dict_en_us, &osk_dict_de, &osk_dict_fr };
+cfg.dictionaries = langs;
+cfg.dictionary_count = 3;       /* cfg.dictionary: the one to start with, else langs[0] */
+```
+
+With two or more dictionaries the prediction key opens the system keyboard's language
+selection window: a button per dictionary (the full names for up to three, the short codes
+beyond that; the one in use is blue). A button picks that dictionary and turns prediction on, the
+button of the current one turns prediction off, B / Quit or a click outside close the window.
+The array and the dictionaries must outlive the keyboard; only the dictionaries you list are
+linked. A single `cfg.dictionary` keeps the plain on / off key.
+
 ## Sounds
 
 ```c
@@ -309,6 +324,13 @@ offers the others and longer words. The 1 key stands for punctuation and the apo
 8` → `don't`). The space key (then labelled `␣` only) ends the word with a space, B or ← drops
 the last key, and any other key ends the word as it is shown. Choosing a candidate replaces it
 and adds a space.
+
+### Numeric keypads
+
+`OSK_LAYOUT_NUMERIC`, `OSK_LAYOUT_NUMERIC_DOT` and `OSK_LAYOUT_NUMERIC_SEPARATOR` are the system
+keyboard's `configNumeric`, `configNumericWithDot` and `configNumericWithSeparator`: a keypad of 0-9
+(plus `.`, plus `,`), without tabs, Enter, symbols or prediction. Anything else typed on a USB
+keyboard is refused. `cfg.filter` can narrow it further.
 
 `OSK_LAYOUT_NUMPAD` opens the keypad in 123 mode. With `OSK_FLAG_LOCK_LAYOUT` it is a keypad of
 digits, `-`, `.` and `,` only, without tags or symbols.

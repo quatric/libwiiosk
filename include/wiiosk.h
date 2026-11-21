@@ -29,9 +29,9 @@ extern "C" {
 #endif
 
 #define WIIOSK_VERSION_MAJOR	2
-#define WIIOSK_VERSION_MINOR	3
+#define WIIOSK_VERSION_MINOR	4
 #define WIIOSK_VERSION_PATCH	0
-#define WIIOSK_VERSION_STRING	"2.3.0"
+#define WIIOSK_VERSION_STRING	"2.4.0"
 
 /* Hard upper bound for the number of characters (code points) in the buffer. */
 #define OSK_MAX_CHARS		2048
@@ -51,7 +51,14 @@ typedef enum {
 	OSK_LAYOUT_QWERTY_UK,	/* since 2.1: UK English */
 	OSK_LAYOUT_QWERTY_IT,	/* Italian */
 	OSK_LAYOUT_QWERTY_ES,	/* Spanish */
-	OSK_LAYOUT_QWERTY_NL	/* Dutch */
+	OSK_LAYOUT_QWERTY_NL,	/* Dutch */
+	/* since 2.4: the system keyboard's numeric keypads (Manager::configNumeric,
+	   ...WithDot, ...WithSeparator). Locked like OSK_FLAG_LOCK_LAYOUT, without
+	   Enter, symbols or prediction, and they take digits (and the keys
+	   they show) only. */
+	OSK_LAYOUT_NUMERIC,		/* 0-9 */
+	OSK_LAYOUT_NUMERIC_DOT,		/* 0-9 and '.' */
+	OSK_LAYOUT_NUMERIC_SEPARATOR	/* 0-9, '.' and the separator ',' */
 } osk_layout;
 
 enum {
@@ -201,6 +208,17 @@ typedef struct {
 	/* Since 2.1. Called for every sound effect. When NULL, the sound is
 	   played through ASND if OSK_InitSound() succeeded. */
 	void (*on_sound)(osk_keyboard *osk, osk_sound sound, void *user);
+
+	/* Since 2.4. The dictionaries the user may choose between, like the
+	   system keyboard's language selection window. With two or more, the
+	   prediction key opens a window of language buttons instead of just
+	   switching prediction: a button picks that dictionary and turns
+	   prediction on, the button of the current one turns it off again,
+	   B / Quit or a click outside close the window. `dictionary` is the
+	   one to start with (the first of the list if NULL). The array and
+	   the dictionaries must outlive the keyboard. */
+	const osk_dictionary *const *dictionaries;
+	unsigned dictionary_count;
 } osk_config;
 
 /* Abstract buttons understood by OSK_Update(). */
@@ -327,7 +345,7 @@ const osk_dictionary *OSK_SystemDictionary(void);	/* of OSK_SystemLanguage() */
 osk_layout OSK_LanguageLayout(osk_language lang);
 osk_layout OSK_SystemLayout(void);			/* of OSK_SystemLanguage() */
 
-/* Set cfg->layout (unless it is OSK_LAYOUT_NUMPAD) and cfg->dictionary
+/* Set cfg->layout (unless it is a numpad or numeric layout) and cfg->dictionary
    from the console language, like the system keyboard. Links all nine
    dictionaries, as OSK_SystemDictionary() does. */
 void OSK_UseSystemLanguage(osk_config *cfg);

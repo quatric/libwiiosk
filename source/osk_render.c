@@ -490,6 +490,17 @@ static void draw_key(osk_keyboard *osk, const osk_key *k)
 		char_centered(&st, cp, k->cx, k->cy);
 		break;
 	}
+	case KEY_LANG: {
+		osk_color c = latched ? rgb(0, 64, 255) : grey(64);
+		float w;
+
+		st = (text_style){ { 28.8f, 34.2f, 0 }, c, c };
+		w = osk_utf8_width(label, &st.fs);
+		if (w > k->w - 16)
+			st.fs.sx *= (k->w - 16) / w;
+		text_centered(&st, label, k->cx, k->cy);
+		break;
+	}
 	case KEY_SYMBOL_PREV:
 	case KEY_SYMBOL_NEXT:
 	case KEY_SYMBOL_CLOSE:
@@ -676,6 +687,16 @@ static void draw_symbol_window(osk_keyboard *osk, const osk_key *keys, int n)
 
 	symbol_zoom(osk);
 	window(OSK_TEX_FRAME_THICK, 16, 44, 163.5f, 552, 280, with_alpha(grey(0), 0), c_white);
+	if (osk->langsel) {
+		/* language window: a title strip above, a pale plate behind the buttons */
+		pic_c(OSK_TEX_WHITE, 320, 263, 538, 226, c_clear, (osk_color){ 0, 0, 0, 32 });
+		pic_c(OSK_TEX_WHITE, 320, 133, 540, 36, c_clear, (osk_color){ 0, 0, 0, 96 });
+		st.top = st.bottom = c_white;
+		text_centered(&st, osk_lang_title(osk), 320, 133);
+		draw_keys(osk, keys, n, false);
+		win_s = win_a = 1;
+		return;
+	}
 	/* dark strip along the bottom, a pale plate behind the page number */
 	pic_c(OSK_TEX_WHITE, 320, 408.8f, 536, 52, c_clear, (osk_color){ 0, 0, 0, 32 });
 	pic_c(OSK_TEX_TOOL, 319.7f, 406.1f, 102, 48, with_alpha(c_white, 0), (osk_color){ 255, 255, 255, 80 });
